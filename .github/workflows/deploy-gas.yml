@@ -1,0 +1,52 @@
+name: Deploy Apps Script backend
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Kod.gs'
+      - 'appsscript.json'
+  workflow_dispatch: {}
+
+env:
+  # Istniejące wdrożenie Web App — to samo ID co w GAS_URL w index.html
+  # (jawne, nie jest sekretem). URL /exec ma zostać bez zmian.
+  # Dopóki jest tu USTAW_PO_PIERWSZYM_WDROZENIU, workflow tylko informuje i kończy się sukcesem.
+  GAS_DEPLOYMENT_ID: USTAW_PO_PIERWSZYM_WDROZENIU
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check configuration
+        id: cfg
+        run: |
+          if [ "$GAS_DEPLOYMENT_ID" = "USTAW_PO_PIERWSZYM_WDROZENIU" ] || [ ! -n "$HAS_SECRET" ]; then
+            echo "::notice::Auto-deploy jeszcze nieskonfigurowany (brak deploymentId albo sekretu CLASPRC_JSON) — pomijam. Instrukcja: CLAUDE.md, sekcja „Pierwsze wdrożenie”."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          HAS_SECRET: ${{ secrets.CLASPRC_JSON != '' && 'yes' || '' }}
+      - uses: actions/checkout@v4
+        if: steps.cfg.outputs.ready == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.cfg.outputs.ready == 'true'
+        with:
+          node-version: '20'
+      - name: Install clasp
+        if: steps.cfg.outputs.ready == 'true'
+        run: npm install -g @google/clasp@latest
+      - name: Restore clasp login credentials
+        if: steps.cfg.outputs.ready == 'true'
+        run: printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+      - name: Push to Apps Script
+        if: steps.cfg.outputs.ready == 'true'
+        run: clasp push -f
+      # --deploymentId jest obowiązkowe: bez niego clasp tworzy NOWE
+      # wdrożenie (nowy URL) zamiast zaktualizować istniejące.
+      - name: Deploy new version to the existing web app (same URL)
+        if: steps.cfg.outputs.ready == 'true'
+        run: clasp deploy --deploymentId "$GAS_DEPLOYMENT_ID" --description "auto-deploy $(date -u +%Y-%m-%dT%H:%M:%SZ)"

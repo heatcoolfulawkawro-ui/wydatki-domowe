@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Wydatki">
+<meta name="theme-color" content="#12181d">
+<title>Wydatki domowe</title>
+<script>
+// Skróty na ekranie głównym telefonu potrafią pokazywać starą wersję z cache.
+// Sprawdzamy w tle prawdziwą wersję na serwerze i przeładowujemy, jeśli jest nowsza.
+(function(){
+  try{
+    fetch(location.pathname, { method:'HEAD', cache:'no-store' }).then(function(res){
+      var v = res.headers.get('last-modified') || res.headers.get('etag');
+      if(!v) return;
+      var stored = localStorage.getItem('wd_page_version');
+      localStorage.setItem('wd_page_version', v);
+      if(stored && stored !== v) location.reload();
+    }).catch(function(){});
+  }catch(e){}
+})();
+</script>
+<style>
+  :root{
+    --bg:#12181d; --panel:#1b232a; --panel2:#212b33; --line:#2c3841;
+    --ink:#e8edf1; --ink-dim:#8fa0ab; --amber:#e8a33d; --green:#4caf7d;
+    --red:#d9695f; --blue:#5b9bd5; --radius:10px;
+  }
+  *{ box-sizing:border-box; }
+  html{ color-scheme:dark; }
+  body{ margin:0; background:var(--bg); color:var(--ink); font:15px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; -webkit-text-size-adjust:100%; padding-bottom:env(safe-area-inset-bottom,0px); }
+  [hidden]{ display:none !important; }
+  button{ font:inherit; color:inherit; cursor:pointer; }
+  header.top{ position:sticky; top:0; z-index:10; background:var(--bg); padding:calc(env(safe-area-inset-top,0px) + 8px) 14px 8px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:10px; }
+  header.top h1{ margin:0; font-size:17px; flex:1; min-width:0; }
+  .vertag{ font-size:10px; font-weight:400; color:var(--ink-dim); background:var(--panel2); border:1px solid var(--line); border-radius:5px; padding:1px 5px; margin-left:6px; vertical-align:middle; }
+  .buildtag{ display:block; font-size:10px; font-weight:400; color:var(--ink-dim); margin-top:1px; }
+  .statusdot{ display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--ink-dim); margin-right:5px; vertical-align:middle; }
+  .statusdot.ok{ background:var(--green); } .statusdot.fail{ background:var(--red); }
+  .userbtn{ background:var(--panel2); border:1px solid var(--line); border-radius:20px; padding:6px 11px; font-size:13px; white-space:nowrap; }
+  .menu{ position:absolute; right:12px; top:calc(env(safe-area-inset-top,0px) + 50px); background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:4px; display:flex; flex-direction:column; min-width:190px; box-shadow:0 8px 24px rgba(0,0,0,.4); z-index:20; }
+  .menu button{ background:none; border:0; text-align:left; padding:11px 12px; border-radius:8px; }
+  .menu button:active{ background:var(--panel2); }
+  main{ max-width:560px; margin:0 auto; padding:12px 14px 40px; display:flex; flex-direction:column; gap:10px; }
+  .card{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:12px; }
+  .h{ font-weight:600; margin:0 0 8px; font-size:15px; }
+  .muted{ color:var(--ink-dim); font-size:13px; }
+  .small{ font-size:12px; }
+  .num{ font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .row{ display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .stack{ display:flex; flex-direction:column; gap:8px; }
+  .g{ color:var(--green); } .r{ color:var(--red); } .b{ color:var(--blue); } .a{ color:var(--amber); }
+  label.f{ display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--ink-dim); min-width:0; }
+  input, select, textarea{ width:100%; min-width:0; background:var(--panel2); border:1px solid var(--line); color:var(--ink); border-radius:8px; padding:9px 8px; font-size:16px; font-family:inherit; }
+  input:focus, select:focus{ outline:2px solid var(--amber); outline-offset:-1px; }
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .grid3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+  .cta{ display:block; width:100%; background:var(--amber); color:#20140a; border:none; border-radius:var(--radius); padding:13px; font-size:16px; font-weight:700; text-align:center; }
+  .cta:disabled{ opacity:.5; }
+  .btn2{ background:var(--panel2); color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:9px 12px; font-size:14px; }
+  .btn2.danger{ color:var(--red); }
+  .btn2.sm{ padding:6px 10px; font-size:13px; }
+  .linkbtn{ background:none; border:0; color:var(--amber); padding:6px 0; font-size:14px; text-align:left; }
+  .msg{ font-size:13px; padding:8px 10px; border-radius:8px; background:var(--panel2); border:1px solid var(--line); }
+  .msg.err{ color:#f0b4ae; border-color:#6b3430; background:#2a1b1a; }
+  .msg.ok{ color:#b6e6c9; border-color:#2f5a43; background:#172620; }
+  .msg.warn{ color:#f0d9ae; border-color:#6b5023; background:#2a2414; }
+  /* logowanie */
+  .auth{ max-width:380px; margin:8vh auto 0; }
+  .auth h2{ margin:0 0 4px; font-size:20px; }
+  .pin{ letter-spacing:6px; font-size:22px; text-align:center; }
+  /* nawigacja miesiąca i zakładki */
+  .monthnav{ display:flex; align-items:center; gap:8px; }
+  .monthnav button{ background:var(--panel); border:1px solid var(--line); border-radius:8px; width:44px; height:40px; font-size:20px; }
+  .monthnav .mlabel{ flex:1; text-align:center; font-weight:600; font-size:16px; }
+  .tabs{ display:grid; grid-template-columns:repeat(4,1fr); gap:4px; background:var(--panel); border-radius:var(--radius); padding:4px; }
+  .tabs button{ background:none; border:0; color:var(--ink-dim); font-size:14px; padding:9px 2px; border-radius:8px; }
+  .tabs button[aria-selected=true]{ background:var(--panel2); color:var(--amber); font-weight:600; }
+  /* KPI i paski */
+  .kpis{ display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .kpi{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:9px; min-width:0; }
+  .kpi b{ display:block; font-size:18px; font-variant-numeric:tabular-nums; }
+  .kpi small{ color:var(--ink-dim); font-size:11px; display:block; }
+  .bar{ height:5px; background:var(--panel2); border-radius:3px; overflow:hidden; margin-top:4px; }
+  .bar i{ display:block; height:100%; background:var(--amber); }
+  .bar i.nf{ background:var(--blue); }
+  .catrow{ padding:7px 0; border-bottom:1px solid var(--line); }
+  .catrow:last-child{ border-bottom:0; }
+  .chip{ display:inline-block; font-size:11px; padding:1px 7px; border-radius:20px; background:var(--panel2); color:var(--ink-dim); border:1px solid var(--line); white-space:nowrap; }
+  .chip.ok{ color:var(--green); border-color:#2f5a43; }
+  .chip.warn{ color:var(--amber); border-color:#6b5023; }
+  .chip.err{ color:var(--red); border-color:#6b3430; }
+  .cols{ display:flex; align-items:flex-end; gap:6px; height:110px; margin-top:6px; }
+  .cols div{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:3px; height:100%; font-size:10px; color:var(--ink-dim); min-width:0; }
+  .cols span{ display:block; width:100%; background:var(--amber); opacity:.55; border-radius:3px 3px 0 0; min-height:2px; }
+  .cols div.cur span{ opacity:1; }
+  .cols em{ font-style:normal; color:var(--ink); font-size:10px; font-variant-numeric:tabular-nums; }
+  /* paragony */
+  .addrow{ display:grid; grid-template-columns:1fr auto; gap:8px; }
+  .filebtn{ position:relative; overflow:hidden; display:block; background:var(--amber); color:#20140a; border-radius:var(--radius); padding:13px; font-size:16px; font-weight:700; text-align:center; }
+  .filebtn input{ position:absolute; inset:0; opacity:0; font-size:200px; cursor:pointer; }
+  .rc{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:10px 12px; }
+  .rc .head{ cursor:pointer; }
+  .rc .shop{ font-weight:600; }
+  .items{ margin-top:8px; border-top:1px solid var(--line); padding-top:8px; display:flex; flex-direction:column; gap:6px; font-size:13px; }
+  .items .cat{ color:var(--blue); font-size:11px; }
+  .items .disc{ color:var(--green); font-size:11px; }
+  .items .note{ color:var(--amber); font-size:11px; }
+  .rcact{ display:flex; gap:8px; justify-content:flex-end; margin-top:6px; flex-wrap:wrap; }
+  table{ width:100%; border-collapse:collapse; font-size:13px; }
+  th, td{ padding:7px 4px; text-align:right; border-bottom:1px solid var(--line); vertical-align:top; }
+  th:first-child, td:first-child{ text-align:left; }
+  th{ color:var(--ink-dim); font-weight:500; font-size:11px; }
+  td.best{ color:var(--green); font-weight:700; }
+  td.worst{ color:var(--red); }
+  td.na{ color:#4d5c66; }
+  tr.clk{ cursor:pointer; }
+  .tw{ overflow-x:auto; }
+  /* edytor paragonu */
+  .pagehead{ display:flex; align-items:center; gap:10px; }
+  .pagehead h2{ margin:0; font-size:17px; flex:1; }
+  .it{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); }
+  .it.bad{ border-color:var(--red); }
+  .it .bar1{ display:flex; align-items:center; gap:8px; padding:10px 12px; cursor:pointer; }
+  .it .bar1 .nm{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .it .body{ padding:0 12px 12px; display:flex; flex-direction:column; gap:8px; }
+  .it .calc{ font-size:12px; color:var(--ink-dim); }
+  .insert{ background:none; border:0; color:var(--ink-dim); font-size:12px; padding:2px 0; text-align:center; }
+  .sumbar{ position:sticky; bottom:0; background:var(--bg); border-top:1px solid var(--line); padding:10px 0 calc(env(safe-area-inset-bottom,0px) + 10px); display:flex; flex-direction:column; gap:8px; z-index:5; }
+  .busy{ display:flex; align-items:center; gap:10px; }
+  .spin{ width:18px; height:18px; border:2px solid var(--line); border-top-color:var(--amber); border-radius:50%; animation:sp 1s linear infinite; flex:none; }
+  @keyframes sp{ to{ transform:rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce){ .spin{ animation:none; } }
+  .testbtn{ display:block; margin:24px auto 12px; background:none; border:none; color:var(--line); font-size:10px; }
+  .savetag{ position:fixed; bottom:calc(env(safe-area-inset-bottom,0px) + 110px); left:50%; transform:translateX(-50%); z-index:30; font-size:13px; background:var(--panel2); border:1px solid var(--line); border-radius:20px; padding:7px 14px; opacity:0; transition:opacity .3s; pointer-events:none; }
+  .savetag.show{ opacity:1; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <!-- Przy KAŻDYM wydaniu: podbij vertag i ustaw buildtag na bieżący czas. -->
+  <h1>Wydatki domowe<span class="vertag">v0.1</span><span class="buildtag"><span class="statusdot" id="statusDot" title="Połączenie z Arkuszem"></span>25.09.2026 18:20</span></h1>
+  <button class="userbtn" id="userBtn" hidden></button>
+</header>
+<div class="menu" id="menu" hidden>
+  <button data-m="pin">Zmień PIN</button>
+  <button data-m="admin" id="menuAdmin" hidden>Panel admina</button>
+  <button data-m="refresh">Odśwież dane</button>
+  <button data-m="logout">Wyloguj</button>
+</div>
+
+<main id="scrAuth" hidden></main>
+
+<main id="scrMain" hidden>
+  <div class="monthnav">
+    <button id="mPrev" aria-label="Poprzedni miesiąc">‹</button>
+    <div class="mlabel" id="mLabel"></div>
+    <button id="mNext" aria-label="Następny miesiąc">›</button>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-t="p" aria-selected="true">Paragony</button>
+    <button role="tab" data-t="m" aria-selected="false">Miesiąc</button>
+    <button role="tab" data-t="s" aria-selected="false">Sklepy</button>
+    <button role="tab" data-t="c" aria-selected="false">Ceny</button>
+  </nav>
+  <div id="syncInfo" hidden></div>
+  <section id="t-p" class="stack">
+    <div class="addrow">
+      <label class="filebtn">📷 Dodaj paragon<input type="file" id="fileIn" accept="image/*,application/pdf" multiple></label>
+      <button class="btn2" id="btnManual">✎ Ręcznie</button>
+    </div>
+    <div class="muted small">Zdjęcie, zrzut ekranu z aplikacji sklepu albo PDF. Długi paragon: zaznacz kilka zrzutów naraz.</div>
+    <div id="parseBox" hidden></div>
+    <div id="rcList" class="stack"></div>
+  </section>
+  <section id="t-m" class="stack" hidden></section>
+  <section id="t-s" class="stack" hidden></section>
+  <section id="t-c" class="stack" hidden></section>
+  <button class="testbtn" id="btnTest">test połączenia</button>
+</main>
+
+<main id="scrEdit" hidden></main>
+<main id="scrAdmin" hidden></main>
+<main id="scrPin" hidden></main>
+
+<div class="savetag" id="savetag"></div>
+
+<script>
+// Stały adres Web App — po pierwszym wdrożeniu NIE MOŻE się zmienić
+// (backend wdrażany zawsze z --deploymentId, patrz .github/workflows/deploy-gas.yml).
+const GAS_URL = 'https://script.google.com/macros/s/__DEPLOYMENT_ID__/exec';
+
+const LS_AUTH = 'wd_auth_v1', LS_CACHE = 'wd_cache_v1', LS_OUTBOX = 'wd_outbox_v1', LS_UI = 'wd_ui_v1';
+const FOOD = ['Mięso i wędliny', 'Ryby', 'Nabiał i jaja', 'Pieczywo', 'Warzywa i owoce', 'Produkty suche i bakalie',
+  'Przyprawy, sosy i przetwory', 'Mrożonki', 'Dania gotowe', 'Słodycze, lody i przekąski', 'Napoje', 'Alkohol'];
+const NONFOOD = ['Chemia i dom', 'Higiena i kosmetyki', 'Kwiaty i inne'];
+const DEPOSIT = 'Kaucja';
+const CATS = FOOD.concat(NONFOOD, [DEPOSIT]);
+const FOOD_SET = new Set(FOOD);
+const MONTHS = ['styczeń', 'luty', 'marzec', 'kwiecień', 'maj', 'czerwiec', 'lipiec', 'sierpień', 'wrzesień', 'październik', 'listopad', 'grudzień'];
+const MONTHS_SHORT = ['sty', 'lut', 'mar', 'kwi', 'maj', 'cze', 'lip', 'sie', 'wrz', 'paź', 'lis', 'gru'];
+const MAX_TILES = 20;
+
+// ---------- pomocnicze ----------
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const r2 = v => Math.round((Number(v) || 0) * 100 + (v >= 0 ? 1e-9 : -1e-9)) / 100;
+const zl = v => (Number(v) || 0).toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const zl0 = v => Math.round(Number(v) || 0).toLocaleString('pl-PL') + ' zł';
+const num = s => { const v = parseFloat(String(s).replace(',', '.').replace(/\s/g, '')); return isFinite(v) ? v : 0; };
+const numStr = v => (v == null || v === '' ? '' : String(v).replace('.', ','));
+const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
+const ymOf = d => d.slice(0, 7);
+const dm = d => d.slice(8, 10) + '.' + d.slice(5, 7);
+const newId = () => 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+function lsGet(k, def) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch (e) { return def; } }
+function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+function toast(t) { const el = $('savetag'); el.textContent = t; el.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 1800); }
+function msgHtml(kind, text) { return `<div class="msg ${kind}">${text}</div>`; }
+const configured = () => GAS_URL.indexOf('__DEPLOYMENT_ID__') < 0;
+
+// ---------- stan ----------
+let auth = lsGet(LS_AUTH, null);          // {token, user, expires}
+let cache = lsGet(LS_CACHE, { receipts: [] });
+let outbox = lsGet(LS_OUTBOX, []);        // [{op:'save', receipt, base} | {op:'delete', id}]
+const ui = Object.assign({ tab: 'p', ym: null }, lsGet(LS_UI, {}));
+let hasKey = true;
+let openRc = null;       // id rozwiniętego paragonu na liście
+let openProd = null;     // rozwinięty produkt w zakładce Ceny
+let pendingDelete = null;
+{ const d = new Date(); ui.ym = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); } // start zawsze od bieżącego miesiąca
+
+// ---------- serwer ----------
+// text/plain — NIE application/json: inaczej preflight CORS + przekierowanie 302 zamienia POST na GET.
+async function api(action, payload) {
+  if (!configured()) throw new Error('offline');
+  const body = Object.assign({ action }, payload || {});
+  if (auth && auth.token && !body.token) body.token = auth.token;
+  const res = await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) });
+  const text = await res.text();
+  let out;
+  try { out = JSON.parse(text); } catch (e) { throw new Error('offline'); }
+  if (out && out.error === 'auth' && auth && action !== 'login') { logoutLocal(); showAuth('Sesja wygasła — zaloguj się ponownie.'); }
+  return out;
+}
+
+async function checkConnection() {
+  const dot = $('statusDot');
+  if (!configured()) { dot.className = 'statusdot fail'; return false; }
+  try { const res = await fetch(GAS_URL, { cache: 'no-store' }); dot.className = 'statusdot ' + (res.ok ? 'ok' : 'fail'); return res.ok; }
+  catch (e) { dot.className = 'statusdot fail'; return false; }
+}
+
+// ---------- dane: bufor lokalny + kolejka zmian ----------
+function allReceipts() {
+  const map = new Map(cache.receipts.map(r => [r.id, r]));
+  outbox.forEach(o => { if (o.op === 'save') map.set(o.receipt.id, o.receipt); else map.delete(o.id); });
+  return [...map.values()];
+}
+function saveLocal() { lsSet(LS_CACHE, cache); lsSet(LS_OUTBOX, outbox); }
+
+let syncing = false;
+async function sync() {
+  if (syncing || !auth) return;
+  syncing = true;
+  const conflicts = [];
+  try {
+    while (outbox.length) {
+      const o = outbox[0];
+      const out = o.op === 'save'
+        ? await api('save', { receipt: o.receipt, baseUpdatedAt: o.base })
+        : await api('delete', { id: o.id });
+      if (!out || out.error === 'auth') return;
+      if (!out.ok && out.error === 'conflict') conflicts.push(o.receipt);
+      else if (!out.ok && out.error !== 'deleted' && out.error !== 'bad') throw new Error(out.error || 'server');
+      outbox.shift();
+      saveLocal();
+    }
+    const list = await api('list');
+    if (list && list.ok) {
+      cache = { receipts: list.receipts, syncedAt: Date.now() };
+      saveLocal();
+      $('statusDot').className = 'statusdot ok';
+    }
+    if (conflicts.length) toast('Ktoś zmienił ten paragon w międzyczasie — pokazuję nowszą wersję');
+  } catch (e) {
+    $('statusDot').className = 'statusdot fail';
+  } finally {
+    syncing = false;
+    renderSyncInfo();
+    if (!$('scrMain').hidden) renderMain();
+  }
+}
+function queue(op) { outbox.push(op); saveLocal(); renderMain(); sync(); }
+function renderSyncInfo() {
+  const el = $('syncInfo');
+  if (!outbox.length) { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = msgHtml('warn', `Czeka na wysłanie do Arkusza: ${outbox.length} ${outbox.length === 1 ? 'zmiana' : 'zmian(y)'} (brak połączenia). Wyślę sam, gdy wróci internet.`);
+}
+
+// ---------- wyliczenia pozycji ----------
+function calcItem(it) {
+  it.gross = r2(it.gross);
+  it.disc = r2(it.disc || 0);
+  it.net = r2(it.gross - it.disc);
+  delete it.ppu; delete it.ppuU;
+  if (it.cat === DEPOSIT || !it.qty) return it;
+  if (it.unit === 'kg') { it.ppu = r2(it.net / it.qty); it.ppuU = 'zł/kg'; }
+  else if (it.size > 0 && it.sizeU) { it.ppu = r2(it.net / it.qty / it.size); it.ppuU = 'zł/' + it.sizeU; }
+  return it;
+}
+const unitPrice = it => it.ppu != null ? it.ppu : (it.qty ? r2(it.net / it.qty) : it.net);
+const unitLabel = it => it.ppuU || 'zł/szt';
+const goodsOf = rs => rs.flatMap(r => r.items.filter(i => i.cat !== DEPOSIT).map(i => Object.assign({ shop: r.shop, date: r.date, rid: r.id }, i)));
+const sum = (a, f) => a.reduce((s, x) => s + (f ? f(x) : x.net), 0);
+const itemsSum = r => r2(sum(r.items));
+function monthReceipts(ym) { return allReceipts().filter(r => ymOf(r.date) === ym).sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)); }
+function shiftYm(ym, d) { let [y, m] = ym.split('-').map(Number); m += d; while (m < 1) { m += 12; y--; } while (m > 12) { m -= 12; y++; } return y + '-' + String(m).padStart(2, '0'); }
+const ymLabel = ym => { const [y, m] = ym.split('-').map(Number); return MONTHS[m - 1] + ' ' + y; };
+
+// Słownik z historii: nazwa z paragonu → ostatnio przypisana kategoria i produkt porównawczy.
+function dictionary() {
+  const d = new Map();
+  allReceipts().sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0)).forEach(r => r.items.forEach(i => {
+    if (i.name) d.set(i.name.trim().toLowerCase(), { cat: i.cat, prod: i.prod });
+  }));
+  return d;
+}
+
+// ---------- ekrany ----------
+function showScreen(id) {
+  ['scrAuth', 'scrMain', 'scrEdit', 'scrAdmin', 'scrPin'].forEach(s => $(s).hidden = s !== id);
+  $('menu').hidden = true;
+  window.scrollTo(0, 0);
+}
+function renderUserBtn() {
+  const b = $('userBtn');
+  b.hidden = !auth;
+  if (auth) b.textContent = auth.user.name + ' ▾';
+  $('menuAdmin').hidden = !(auth && auth.user.role === 'admin');
+}
+
+// ---------- logowanie ----------
+function logoutLocal() { auth = null; lsDel(LS_AUTH); renderUserBtn(); }
+function setAuth(out) { auth = { token: out.token, user: out.user, expires: out.expires }; lsSet(LS_AUTH, auth); renderUserBtn(); }
+
+async function showAuth(note) {
+  showScreen('scrAuth');
+  const el = $('scrAuth');
+  if (!configured()) {
+    el.innerHTML = `<div class="auth card stack"><h2>Wydatki domowe</h2>${msgHtml('warn', 'Appka nie jest jeszcze podłączona do Arkusza Google. Gdy Claude wpisze adres backendu, pojawi się tu logowanie.')}</div>`;
+    return;
+  }
+  el.innerHTML = `<div class="auth card stack"><div class="busy"><div class="spin"></div><span class="muted">Łączę z Arkuszem…</span></div></div>`;
+  let st = null;
+  try { st = await api('status'); } catch (e) {}
+  if (st && st.ok && st.setup) return showBootstrap();
+  el.innerHTML = `<form class="auth card stack" id="loginForm" autocomplete="on">
+    <h2>Zaloguj się</h2>
+    ${note ? msgHtml('warn', esc(note)) : ''}
+    ${!st ? msgHtml('err', 'Brak połączenia z Arkuszem. Sprawdź internet.') : ''}
+    <label class="f">Login (skrót, np. PF)<input id="lgUser" autocapitalize="characters" autocomplete="username" maxlength="6" value="${esc(lsGet(LS_UI, {}).lastUser || '')}"></label>
+    <label class="f">PIN (6 cyfr)<input id="lgPin" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="current-password"></label>
+    <div id="lgMsg"></div>
+    <button class="cta" type="submit">Zaloguj</button>
+    <button class="linkbtn" type="button" id="lgForgot">Nie pamiętam PIN-u / pierwsze logowanie</button>
+  </form>`;
+  $('loginForm').onsubmit = async e => {
+    e.preventDefault();
+    const user = $('lgUser').value.trim().toUpperCase(), pin = $('lgPin').value.trim();
+    const box = $('lgMsg');
+    if (!/^[A-Z]{1,6}$/.test(user) || !/^\d{6}$/.test(pin)) { box.innerHTML = msgHtml('err', 'Login to 1–6 liter, PIN to 6 cyfr.'); return; }
+    box.innerHTML = '';
+    try {
+      const out = await api('login', { user, pin });
+      if (out.ok) { ui.lastUser = user; lsSet(LS_UI, ui); setAuth(out); return startMain(); }
+      box.innerHTML = msgHtml('err', out.error === 'locked' ? `Za dużo błędnych prób. Spróbuj za ${Math.ceil((out.retryMs || 0) / 60000)} min albo poproś admina o odblokowanie.` : 'Zły login albo PIN.');
+    } catch (err) { box.innerHTML = msgHtml('err', 'Brak połączenia z Arkuszem.'); }
+  };
+  $('lgForgot').onclick = async () => {
+    const user = $('lgUser').value.trim().toUpperCase();
+    const box = $('lgMsg');
+    if (!/^[A-Z]{1,6}$/.test(user)) { box.innerHTML = msgHtml('err', 'Wpisz najpierw swój login (skrót).'); return; }
+    try {
+      await api('requestLink', { user });
+      box.innerHTML = msgHtml('ok', 'Jeśli to konto ma zapisany e-mail, właśnie wysłałem link do ustawienia PIN-u. Sprawdź pocztę (także spam).');
+    } catch (err) { box.innerHTML = msgHtml('err', 'Brak połączenia z Arkuszem.'); }
+  };
+}
+
+function showBootstrap() {
+  const el = $('scrAuth');
+  el.innerHTML = `<form class="auth card stack" id="bsForm">
+    <h2>Pierwsze uruchomienie</h2>
+    <div class="muted">Zakładasz konto administratora. Link do ustawienia PIN-u przyjdzie na e-mail właściciela Arkusza.</div>
+    <label class="f">Login (skrót, 1–6 liter)<input id="bsId" autocapitalize="characters" maxlength="6" value="PF"></label>
+    <label class="f">Imię<input id="bsName" maxlength="40" value="Paweł"></label>
+    <div id="bsMsg"></div>
+    <button class="cta" type="submit">Załóż konto admina</button>
+  </form>`;
+  $('bsForm').onsubmit = async e => {
+    e.preventDefault();
+    const id = $('bsId').value.trim().toUpperCase(), name = $('bsName').value.trim();
+    const box = $('bsMsg');
+    if (!/^[A-Z]{1,6}$/.test(id) || !name) { box.innerHTML = msgHtml('err', 'Uzupełnij login (litery) i imię.'); return; }
+    try {
+      const out = await api('bootstrap', { id, name });
+      box.innerHTML = out.ok ? msgHtml('ok', `Gotowe. Link do ustawienia PIN-u wysłany na ${esc(out.sentTo)}. Otwórz go na tym telefonie.`)
+        : msgHtml('err', out.error === 'exists' ? 'Konto admina już istnieje — odśwież stronę i zaloguj się.' : 'Nie udało się (' + esc(out.error) + ').');
+    } catch (err) { box.innerHTML = msgHtml('err', 'Brak połączenia z Arkuszem.'); }
+  };
+}
+
+// Ekran z linku z maila: ?pin=TOKEN
+async function showSetPin(link) {
+  showScreen('scrPin');
+  const el = $('scrPin');
+  el.innerHTML = `<div class="auth card stack"><div class="busy"><div class="spin"></div><span class="muted">Sprawdzam link…</span></div></div>`;
+  let chk = null;
+  try { chk = await api('checkLink', { link }); } catch (e) {}
+  const clearUrl = () => history.replaceState(null, '', location.pathname);
+  if (!chk || !chk.ok) {
+    el.innerHTML = `<div class="auth card stack"><h2>Link nie działa</h2>${msgHtml('err', chk ? 'Link wygasł albo został już użyty. Poproś o nowy: na ekranie logowania „Nie pamiętam PIN-u”.' : 'Brak połączenia z Arkuszem.')}<button class="cta" id="spBack">Przejdź do logowania</button></div>`;
+    $('spBack').onclick = () => { clearUrl(); showAuth(); };
+    return;
+  }
+  el.innerHTML = `<form class="auth card stack" id="spForm">
+    <h2>${chk.purpose === 'invite' ? 'Witaj' : 'Nowy PIN'}, ${esc(chk.user.name)}</h2>
+    <div class="muted">Twój login: <b>${esc(chk.user.id)}</b>. Ustaw 6-cyfrowy PIN — będziesz go wpisywać przy logowaniu.</div>
+    <label class="f">Nowy PIN<input id="spPin1" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password"></label>
+    <label class="f">Powtórz PIN<input id="spPin2" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password"></label>
+    <div id="spMsg"></div>
+    <button class="cta" type="submit">Ustaw PIN i wejdź</button>
+  </form>`;
+  $('spForm').onsubmit = async e => {
+    e.preventDefault();
+    const p1 = $('spPin1').value.trim(), p2 = $('spPin2').value.trim(), box = $('spMsg');
+    if (!/^\d{6}$/.test(p1)) { box.innerHTML = msgHtml('err', 'PIN to dokładnie 6 cyfr.'); return; }
+    if (p1 !== p2) { box.innerHTML = msgHtml('err', 'PIN-y się różnią.'); return; }
+    try {
+      const out = await api('setPinByLink', { link, pin: p1 });
+      if (!out.ok) { box.innerHTML = msgHtml('err', out.error === 'link' ? 'Link wygasł albo został już użyty.' : 'Nie udało się.'); return; }
+      clearUrl();
+      ui.lastUser = out.user.id; lsSet(LS_UI, ui);
+      setAuth(out);
+      toast('PIN ustawiony');
+      startMain();
+    } catch (err) { box.innerHTML = msgHtml('err', 'Brak połączenia z Arkuszem.'); }
+  };
+}
+
+function showChangePin() {
+  showScreen('scrPin');
+  const el = $('scrPin');
+  el.innerHTML = `<div class="pagehead"><button class="btn2" id="cpBack">‹ Wróć</button><h2>Zmień PIN</h2></div>
+  <form class="card stack" id="cpForm">
+    <label class="f">Obecny PIN<input id="cpOld" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="current-password"></label>
+    <label class="f">Nowy PIN<input id="cpNew1" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password"></label>
+    <label class="f">Powtórz nowy PIN<input id="cpNew2" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password"></label>
+    <div id="cpMsg"></div>
+    <button class="cta" type="submit">Zmień PIN</button>
+    <div class="muted small">Nie pamiętasz obecnego? Wyloguj się i na ekranie logowania wybierz „Nie pamiętam PIN-u” — link przyjdzie na e-mail.</div>
+  </form>`;
+  $('cpBack').onclick = () => startMain();
+  $('cpForm').onsubmit = async e => {
+    e.preventDefault();
+    const o = $('cpOld').value.trim(), n1 = $('cpNew1').value.trim(), n2 = $('cpNew2').value.trim(), box = $('cpMsg');
+    if (!/^\d{6}$/.test(o) || !/^\d{6}$/.test(n1)) { box.innerHTML = msgHtml('err', 'PIN to dokładnie 6 cyfr.'); return; }
+    if (n1 !== n2) { box.innerHTML = msgHtml('err', 'Nowe PIN-y się różnią.'); return; }
+    try {
+      const out = await api('changePin', { oldPin: o, newPin: n1 });
+      if (!out.ok) { box.innerHTML = msgHtml('err', 'Zły obecny PIN.'); return; }
+      setAuth(out);
+      toast('PIN zmieniony');
+      startMain();
+    } catch (err) { box.innerHTML = msgHtml('err', 'Brak połączenia z Arkuszem.'); }
+  };
+}
+
+// ---------- ekran główny ----------
+function startMain() {
+  showScreen('scrMain');
+  renderUserBtn();
+  renderMain();
+  renderSyncInfo();
+  sync();
+  api('me').then(out => { if (out && out.ok) { auth.user = out.user; lsSet(LS_AUTH, auth); hasKey = out.hasKey; renderUserBtn(); } }).catch(() => {});
+}
+
+function setTab(t) {
+  ui.tab = t; lsSet(LS_UI, ui);
+  document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.t === t)));
+  ['p', 'm', 's', 'c'].forEach(k => $('t-' + k).hidden = k !== t);
+  renderMain();
+}
+
+function renderMain() {
+  $('mLabel').textContent = ymLabel(ui.ym);
+  const t = ui.tab;
+  if (t === 'p') renderReceipts();
+  else if (t === 'm') renderMonth();
+  else if (t === 's') renderShops();
+  else renderPrices();
+}
+
+function itemLine(i) {
+  const q = i.qty !== 1 ? ` <span class="muted">${i.unit === 'kg' ? numStr(i.qty) + ' kg' : i.qty + ' szt'}</span>` : '';
+  return `<div class="row"><span>${esc(i.name)}${q}<br>
+    <span class="cat">${esc(i.cat)}${i.prod ? ' · ' + esc(i.prod) : ''}${i.ppu != null ? ' · ' + zl(i.ppu) + ' ' + esc(i.ppuU) : ''}</span>
+    ${i.disc ? `<br><span class="disc">rabat −${zl(i.disc)} (było ${zl(i.gross)})</span>` : ''}
+    ${i.note ? `<br><span class="note">${esc(i.note)}</span>` : ''}</span><span class="num">${zl(i.net)}</span></div>`;
+}
+
+function renderReceipts() {
+  const list = monthReceipts(ui.ym);
+  const pend = new Set(outbox.filter(o => o.op === 'save').map(o => o.receipt.id));
+  const tot = sum(list, r => r.total);
+  let h = `<div class="row muted"><span>${ymLabel(ui.ym)}</span><span class="num">${list.length} parag. · ${zl(tot)} zł</span></div>`;
+  if (!list.length) h += `<div class="card muted">Brak paragonów w tym miesiącu. Dodaj pierwszy przyciskiem „📷 Dodaj paragon”.</div>`;
+  h += list.map(r => {
+    const g = r.items.filter(i => i.cat !== DEPOSIT);
+    const d = sum(g, i => i.disc || 0);
+    const ok = Math.abs(itemsSum(r) - r.total) < 0.005;
+    const open = openRc === r.id;
+    return `<div class="rc"><div class="head" data-rc="${esc(r.id)}">
+      <div class="row"><span class="shop">${esc(r.shop || 'Sklep?')}</span><span class="num"><b>${zl(r.total)} zł</b></span></div>
+      <div class="row muted small"><span>${dm(r.date)}${r.time ? ' ' + esc(r.time) : ''} · ${g.length} poz.${d > 0 ? ` · <span class="g">rabaty −${zl(d)}</span>` : ''}</span>
+      <span>${pend.has(r.id) ? '<span class="chip warn">czeka na wysłanie</span>' : ok ? '' : '<span class="chip err">suma się nie zgadza</span>'}</span></div></div>
+      ${open ? `<div class="items">${r.items.map(itemLine).join('')}
+        <div class="row"><b>Suma pozycji</b><b class="num">${zl(itemsSum(r))}</b></div>
+        <div class="muted small">${r.place ? esc(r.place) + ' · ' : ''}${r.pay ? esc(r.pay) + ' · ' : ''}dodał(a): ${esc(r.addedBy || '—')}${r.updatedBy && r.updatedBy !== r.addedBy ? ', zmienił(a): ' + esc(r.updatedBy) : ''}</div>
+        <div class="rcact">${pendingDelete === r.id
+          ? `<span class="muted small" style="align-self:center">Usunąć ten paragon?</span><button class="btn2 sm" data-delno="1">Nie</button><button class="btn2 sm danger" data-delyes="${esc(r.id)}">Tak, usuń</button>`
+          : `<button class="btn2 sm danger" data-del="${esc(r.id)}">Usuń</button><button class="btn2 sm" data-edit="${esc(r.id)}">✎ Edytuj</button>`}</div>
+      </div>` : ''}</div>`;
+  }).join('');
+  $('rcList').innerHTML = h;
+}
+
+function renderMonth() {
+  const rs = monthReceipts(ui.ym), goods = goodsOf(rs);
+  const total = sum(goods), food = sum(goods.filter(i => FOOD_SET.has(i.cat))), disc = sum(goods, i => i.disc || 0);
+  const byCat = {}; goods.forEach(i => byCat[i.cat] = (byCat[i.cat] || 0) + i.net);
+  const cats = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+  // prognoza tylko dla bieżącego miesiąca, od 7. dnia
+  const now = new Date(), curYm = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+  const dim = new Date(+ui.ym.slice(0, 4), +ui.ym.slice(5, 7), 0).getDate();
+  const forecast = ui.ym === curYm && now.getDate() >= 7 && total > 0 ? total / now.getDate() * dim : null;
+  // 6 miesięcy
+  const months = []; for (let k = 5; k >= 0; k--) months.push(shiftYm(ui.ym, -k));
+  const mt = months.map(ym => sum(goodsOf(monthReceipts(ym))));
+  const mx = Math.max(1, ...mt);
+  const withData = mt.filter(v => v > 0);
+  const year = ui.ym.slice(0, 4);
+  const yearT = sum(goodsOf(allReceipts().filter(r => r.date.startsWith(year))));
+  let h = `<div class="kpis">
+    <div class="kpi"><small>Razem</small><b>${zl0(total)}</b><small>bez kaucji</small></div>
+    <div class="kpi"><small>w tym jedzenie</small><b>${zl0(food)}</b><small>${pct(food, total)}% wydatków</small></div>
+    ${forecast != null ? `<div class="kpi"><small>prognoza</small><b class="b">${zl0(forecast)}</b><small>na cały miesiąc</small></div>`
+      : `<div class="kpi"><small>rabaty</small><b class="g">${zl0(disc)}</b><small>zaoszczędzone</small></div>`}
+  </div>
+  <div class="card"><p class="h">Ostatnie 6 miesięcy</p><div class="cols">${months.map((ym, k) =>
+    `<div class="${ym === ui.ym ? 'cur' : ''}"><em>${mt[k] ? Math.round(mt[k]) : ''}</em><span style="height:${mt[k] / mx * 80}%"></span>${MONTHS_SHORT[+ym.slice(5, 7) - 1]}</div>`).join('')}</div>
+    <div class="row muted small" style="margin-top:6px"><span>${withData.length ? 'Średnio ' + zl0(sum(withData, v => v) / withData.length) + '/mies.' : ''}</span><span>Rok ${year}: ${zl0(yearT)}</span></div></div>`;
+  if (forecast != null) h += `<div class="card row"><span>Rabaty w tym miesiącu</span><b class="g num">−${zl(disc)} zł</b></div>`;
+  h += `<div class="card"><p class="h">Kategorie</p>${cats.length ? cats.map(([c, v]) => `<div class="catrow"><div class="row"><span>${esc(c)}${FOOD_SET.has(c) ? '' : ' <span class="chip">poza jedzeniem</span>'}</span><span class="num">${zl(v)} zł · ${pct(v, total)}%</span></div><div class="bar"><i class="${FOOD_SET.has(c) ? '' : 'nf'}" style="width:${v / cats[0][1] * 100}%"></i></div></div>`).join('') : '<div class="muted">Brak danych.</div>'}</div>`;
+  const deps = sum(rs.flatMap(r => r.items.filter(i => i.cat === DEPOSIT)));
+  if (deps) h += `<div class="muted small">Kaucje (nie są liczone jako wydatek): ${deps > 0 ? 'wpłacone' : 'odzyskane'} ${zl(Math.abs(deps))} zł netto.</div>`;
+  $('t-m').innerHTML = h;
+}
+
+function renderShops() {
+  const rs = monthReceipts(ui.ym), goods = goodsOf(rs), total = sum(goods);
+  const shops = [...new Set(rs.map(r => r.shop || '?'))];
+  const st = shops.map(s => ({ s, v: sum(goods.filter(i => (i.shop || '?') === s)), n: rs.filter(r => (r.shop || '?') === s).length })).sort((a, b) => b.v - a.v);
+  const catShop = {};
+  goods.filter(i => FOOD_SET.has(i.cat)).forEach(i => { (catShop[i.cat] = catShop[i.cat] || {}); catShop[i.cat][i.shop] = (catShop[i.cat][i.shop] || 0) + i.net; });
+  const catT = c => sum(Object.values(catShop[c]), v => v);
+  let h = `<div class="card"><p class="h">Gdzie zostawiamy pieniądze</p>${st.length ? st.map(x => `<div class="catrow"><div class="row"><span>${esc(x.s)} <span class="muted small">· ${x.n} ${x.n === 1 ? 'wizyta' : x.n < 5 ? 'wizyty' : 'wizyt'} · śr. ${zl0(x.v / x.n)}</span></span><span class="num">${zl(x.v)} zł · ${pct(x.v, total)}%</span></div><div class="bar"><i style="width:${pct(x.v, total)}%"></i></div></div>`).join('') : '<div class="muted">Brak danych.</div>'}</div>`;
+  if (st.length > 1) {
+    h += `<div class="card"><p class="h">Kategorie jedzenia w sklepach</p><div class="muted small" style="margin-bottom:6px">Ile wydaliśmy na daną kategorię w każdym sklepie (${ymLabel(ui.ym)})</div><div class="tw"><table><tr><th>Kategoria</th>${st.map(x => `<th>${esc(x.s)}</th>`).join('')}</tr>` +
+      Object.keys(catShop).sort((a, b) => catT(b) - catT(a)).map(c => `<tr><td>${esc(c)}</td>${st.map(x => catShop[c][x.s] ? `<td class="num">${zl(catShop[c][x.s])}</td>` : '<td class="na">—</td>').join('')}</tr>`).join('') +
+      `</table></div></div>`;
+  }
+  h += `<div class="muted small">Porównanie cen tych samych produktów między sklepami jest w zakładce „Ceny” (z całej historii).</div>`;
+  $('t-s').innerHTML = h;
+}
+
+function renderPrices() {
+  const goods = goodsOf(allReceipts()).filter(i => i.prod);
+  const byProd = {};
+  goods.forEach(i => (byProd[i.prod] = byProd[i.prod] || []).push(i));
+  const shopsAll = [...new Set(goods.map(i => i.shop))];
+  const rows = Object.entries(byProd).map(([p, a]) => {
+    a.sort((x, y) => y.date.localeCompare(x.date));
+    const last = {};
+    a.forEach(i => { if (last[i.shop] == null) last[i.shop] = unitPrice(i); });
+    return { p, a, last, u: unitLabel(a[0]), shops: Object.keys(last) };
+  });
+  const cmp = rows.filter(x => x.shops.length > 1).sort((a, b) => a.p.localeCompare(b.p, 'pl'));
+  const shopCols = shopsAll.filter(s => cmp.some(x => x.last[s] != null));
+  const detail = x => `<tr><td colspan="${shopCols.length + 1}"><div class="stack small">${x.a.slice(0, 12).map(i => `<div class="row"><span>${dm(i.date)}.${i.date.slice(2, 4)} ${esc(i.shop)} <span class="muted">${esc(i.name)}</span>${i.disc ? ' <span class="g">rabat</span>' : ''}</span><span class="num">${zl(unitPrice(i))} ${esc(unitLabel(i))}</span></div>`).join('')}</div></td></tr>`;
+  let h = `<div class="card"><p class="h">Ten sam produkt w różnych sklepach</p><div class="muted small" style="margin-bottom:8px">Ostatnia cena po rabatach, przeliczona na kg, litr albo sztukę. Zielona = najtaniej. Dotknij wiersza, żeby zobaczyć historię.</div>`;
+  if (!cmp.length) h += `<div class="muted">Jeszcze nic do porównania — produkt musi być kupiony w co najmniej dwóch sklepach.</div>`;
+  else h += `<div class="tw"><table><tr><th>Produkt</th>${shopCols.map(s => `<th>${esc(s)}</th>`).join('')}</tr>` + cmp.map(x => {
+    const vals = Object.values(x.last), lo = Math.min(...vals), hi = Math.max(...vals);
+    return `<tr class="clk" data-prod="${esc(x.p)}"><td>${esc(x.p)} <span class="muted small">${esc(x.u)}</span></td>${shopCols.map(s => x.last[s] == null ? '<td class="na">—</td>' : `<td class="num ${lo < hi ? (x.last[s] === lo ? 'best' : x.last[s] === hi ? 'worst' : '') : ''}">${zl(x.last[s])}</td>`).join('')}</tr>` + (openProd === x.p ? detail(x) : '');
+  }).join('') + `</table></div>`;
+  h += `</div>`;
+  const rep = rows.filter(x => x.a.length > 1).map(x => { const v = x.a.map(unitPrice); return Object.assign(x, { lo: Math.min(...v), hi: Math.max(...v) }); })
+    .filter(x => x.hi - x.lo >= 0.01).sort((a, b) => (b.hi - b.lo) / b.hi - (a.hi - a.lo) / a.hi);
+  if (rep.length) {
+    h += `<div class="card"><p class="h">Ta sama rzecz, różne ceny</p><div class="muted small" style="margin-bottom:8px">Najdroższy i najtańszy zakup tego samego produktu (np. z rabatem i bez)</div><div class="tw"><table><tr><th>Produkt</th><th>Najdrożej</th><th>Najtaniej</th></tr>` +
+      rep.slice(0, 30).map(x => `<tr class="clk" data-prod="${esc(x.p)}"><td>${esc(x.p)} <span class="muted small">${esc(x.u)}</span></td><td class="num worst">${zl(x.hi)}</td><td class="num best">${zl(x.lo)}</td></tr>` +
+        (openProd === x.p ? `<tr><td colspan="3"><div class="stack small">${x.a.slice(0, 12).map(i => `<div class="row"><span>${dm(i.date)}.${i.date.slice(2, 4)} ${esc(i.shop)}${i.disc ? ' <span class="g">rabat</span>' : ''}</span><span class="num">${zl(unitPrice(i))} ${esc(unitLabel(i))}</span></div>`).join('')}</div></td></tr>` : '')).join('') + `</table></div></div>`;
+  }
+  $('t-c').innerHTML = h;
+}
+
+// ---------- dodawanie paragonu: pliki → Claude ----------
+function readAsDataURL(file) { return new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = no; fr.readAsDataURL(file); }); }
+function loadImage(src) { return new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = no; im.src = src; }); }
+
+// Długie zrzuty paragonów (np. 1170×22000 px) tniemy na zachodzące na siebie kawałki,
+// żeby tekst był czytelny — Claude i tak zmniejsza każde zdjęcie do ~1,5 Mpx.
+async function imageToTiles(file) {
+  const im = await loadImage(await readAsDataURL(file));
+  const W = Math.min(im.naturalWidth, 760);
+  const scale = W / im.naturalWidth;
+  const H = Math.round(im.naturalHeight * scale);
+  const TILE = 1400, OVER = 110;
+  const tiles = [];
+  for (let y = 0; y < H; y += TILE - OVER) {
+    const h = Math.min(TILE, H - y);
+    const c = document.createElement('canvas');
+    c.width = W; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, h);
+    ctx.drawImage(im, 0, y / scale, im.naturalWidth, h / scale, 0, 0, W, h);
+    tiles.push({ type: 'image/jpeg', data: c.toDataURL('image/jpeg', 0.85).split(',')[1] });
+    if (y + h >= H) break;
+  }
+  return tiles;
+}
+
+async function onFiles(files) {
+  const box = $('parseBox');
+  box.hidden = false;
+  if (!hasKey) { box.innerHTML = msgHtml('err', 'Odczyt paragonów nie jest jeszcze włączony: admin musi wpisać klucz Claude w Panelu admina. Na razie możesz wpisać paragon ręcznie.'); return; }
+  box.innerHTML = `<div class="card busy"><div class="spin"></div><div><b>Czytam paragon…</b><div class="muted small">Zwykle 20–60 sekund. Nie zamykaj appki.</div></div></div>`;
+  try {
+    let parts = [];
+    for (const f of files) {
+      if (f.type === 'application/pdf') parts.push({ type: 'application/pdf', data: (await readAsDataURL(f)).split(',')[1] });
+      else parts = parts.concat(await imageToTiles(f));
+    }
+    if (parts.length > MAX_TILES) { box.innerHTML = msgHtml('err', `Za dużo stron/kawałków (${parts.length}, max ${MAX_TILES}). Dodaj paragon w dwóch częściach albo jako PDF.`); return; }
+    const dict = dictionary();
+    const hints = [...dict.entries()].slice(-300).map(([n, v]) => `${n} → ${v.cat} / ${v.prod || ''}`);
+    const out = await api('parse', { files: parts, categories: CATS, hints });
+    if (!out.ok) {
+      const why = { nokey: 'brak klucza Claude (Panel admina)', claude: 'Claude nie odczytał paragonu' + (out.detail ? ` (${esc(out.detail)})` : ''), bad: 'nieobsługiwany plik', auth: 'sesja wygasła' }[out.error] || esc(out.error);
+      box.innerHTML = msgHtml('err', 'Nie udało się: ' + why + '. Spróbuj jeszcze raz albo wpisz ręcznie.');
+      return;
+    }
+    box.hidden = true; box.innerHTML = '';
+    openEditor(fromParsed(out.receipt, dict), true);
+  } catch (e) {
+    box.innerHTML = msgHtml('err', 'Brak połączenia z Arkuszem albo odczyt trwał za długo. Spróbuj jeszcze raz (najlepiej na Wi-Fi).');
+  }
+}
+
+function fromParsed(p, dict) {
+  const items = (p.items || []).map(x => {
+    const it = { name: String(x.n || ''), prod: String(x.g || ''), cat: CATS.includes(x.c) ? x.c : 'Kwiaty i inne', qty: Number(x.q) || 1, unit: x.u === 'kg' ? 'kg' : 'szt',
+      price: Number(x.p) || 0, gross: Number(x.v) || 0, disc: Math.abs(Number(x.d) || 0), size: Number(x.s) || 0, sizeU: x.su || '' };
+    if (x.note) it.note = String(x.note);
+    const known = dict.get(it.name.trim().toLowerCase());
+    if (known) { it.cat = known.cat; if (known.prod) it.prod = known.prod; }
+    return calcItem(it);
+  });
+  return { id: newId(), shop: String(p.shop || ''), place: String(p.place || ''), date: /^\d{4}-\d{2}-\d{2}$/.test(p.date) ? p.date : new Date().toISOString().slice(0, 10),
+    time: String(p.time || ''), total: r2(p.total), pay: String(p.pay || ''), items, source: 'claude', warnings: (p.warnings || []).map(String) };
+}
+
+// ---------- edytor paragonu ----------
+let ed = null; // {r, isNew, base, open:Set, confirm:null|'sum'|'dup'}
+
+function openEditor(r, isNew) {
+  const copy = JSON.parse(JSON.stringify(r));
+  ed = { r: copy, isNew, base: isNew ? null : (r.updatedAt || null), open: new Set(), confirm: null };
+  if (isNew && !copy.items.length) { copy.items.push(blankItem()); ed.open.add(0); }
+  copy.items.forEach((it, k) => { if (it.note) ed.open.add(k); });
+  showScreen('scrEdit');
+  renderEditor();
+}
+function blankItem() { return { name: '', prod: '', cat: 'Warzywa i owoce', qty: 1, unit: 'szt', price: 0, gross: 0, disc: 0, net: 0, size: 0, sizeU: '' }; }
+
+function itemBad(it) { return !it.name.trim() || !(it.qty > 0) || (it.cat !== DEPOSIT && it.gross < 0) || it.disc > Math.abs(it.gross) + 0.001; }
+function itemCalcText(it) {
+  const parts = [`${numStr(it.qty)} ${it.unit} × ${zl(it.price)} = ${zl(it.gross)}`];
+  if (it.disc) parts.push(`− rabat ${zl(it.disc)}`);
+  parts.push(`= <b>${zl(it.net)} zł</b>`);
+  if (it.ppu != null) parts.push(`· ${zl(it.ppu)} ${it.ppuU}`);
+  return parts.join(' ') + (itemBad(it) ? ' <span class="r">· uzupełnij nazwę / ilość</span>' : '');
+}
+
+function renderEditor() {
+  const r = ed.r;
+  const shops = [...new Set(allReceipts().map(x => x.shop).filter(Boolean))];
+  const prods = [...new Set(allReceipts().flatMap(x => x.items.map(i => i.prod)).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pl'));
+  const catOpts = sel => CATS.map(c => `<option${c === sel ? ' selected' : ''}>${esc(c)}</option>`).join('');
+  const itemHtml = (it, k) => {
+    const open = ed.open.has(k);
+    return `<div class="it${itemBad(it) ? ' bad' : ''}" data-k="${k}">
+      <div class="bar1" data-tog="${k}"><span class="nm"><span data-lblname="${k}">${esc(it.name) || 'nowa pozycja'}</span><br><span class="muted small" data-lblcat="${k}">${esc(it.cat)}</span>${it.note ? ' <span class="chip warn">sprawdź</span>' : ''}</span><b class="num" data-lblnet="${k}">${zl(it.net)}</b><span class="muted">${open ? '▴' : '▾'}</span></div>
+      ${open ? `<div class="body">
+        ${it.note ? msgHtml('warn', esc(it.note)) : ''}
+        <label class="f">Nazwa z paragonu<input data-f="name" value="${esc(it.name)}"></label>
+        <div class="grid2">
+          <label class="f">Kategoria<select data-f="cat">${catOpts(it.cat)}</select></label>
+          <label class="f">Produkt do porównań<input data-f="prod" list="dlProd" value="${esc(it.prod)}" placeholder="np. Mleko 2%"></label>
+        </div>
+        <div class="grid3">
+          <label class="f">Ilość<input data-f="qty" inputmode="decimal" value="${numStr(it.qty)}"></label>
+          <label class="f">Jedn.<select data-f="unit"><option${it.unit === 'szt' ? ' selected' : ''}>szt</option><option${it.unit === 'kg' ? ' selected' : ''}>kg</option></select></label>
+          <label class="f">Cena jedn.<input data-f="price" inputmode="decimal" value="${numStr(it.price)}"></label>
+        </div>
+        <div class="grid3">
+          <label class="f">Rabat (zł)<input data-f="disc" inputmode="decimal" value="${numStr(it.disc || '')}" placeholder="0"></label>
+          <label class="f">Gramatura 1 szt.<input data-f="size" inputmode="decimal" value="${it.size ? numStr(it.size) : ''}" placeholder="np. 0,5"></label>
+          <label class="f">w<select data-f="sizeU"><option value=""${!it.sizeU ? ' selected' : ''}>—</option><option${it.sizeU === 'kg' ? ' selected' : ''}>kg</option><option${it.sizeU === 'l' ? ' selected' : ''}>l</option></select></label>
+        </div>
+        <div class="calc" data-lblcalc="${k}">${itemCalcText(it)}</div>
+        <div class="row"><button class="linkbtn" data-dupitem="${k}">⧉ Powiel</button><button class="btn2 sm danger" data-delitem="${k}">Usuń pozycję</button></div>
+      </div>` : ''}
+    </div>`;
+  };
+  $('scrEdit').innerHTML = `<div class="pagehead"><button class="btn2" id="edBack">‹ Wróć</button><h2>${ed.isNew ? 'Nowy paragon' : 'Edycja paragonu'}</h2></div>
+    ${(r.warnings || []).length ? msgHtml('warn', '<b>Uwagi z odczytu:</b><br>' + r.warnings.map(esc).join('<br>')) : ''}
+    <div class="card stack">
+      <div class="grid2">
+        <label class="f">Sklep<input id="edShop" list="dlShop" value="${esc(r.shop)}"></label>
+        <label class="f">Data<input id="edDate" type="date" value="${esc(r.date)}"></label>
+      </div>
+      <div class="grid2">
+        <label class="f">Do zapłaty (zł)<input id="edTotal" inputmode="decimal" value="${numStr(r.total)}"></label>
+        <label class="f">Godzina<input id="edTime" value="${esc(r.time)}" placeholder="GG:MM"></label>
+      </div>
+      <div class="grid2">
+        <label class="f">Miejsce<input id="edPlace" value="${esc(r.place)}"></label>
+        <label class="f">Płatność<input id="edPay" value="${esc(r.pay)}"></label>
+      </div>
+    </div>
+    <div class="row muted small"><span>Pozycje (${r.items.length})</span><span>dotknij, żeby poprawić</span></div>
+    <div class="stack" id="edItems">${r.items.map(itemHtml).join('')}</div>
+    <button class="btn2" id="edAdd">＋ Pozycja</button>
+    <datalist id="dlShop">${shops.map(s => `<option value="${esc(s)}">`).join('')}</datalist>
+    <datalist id="dlProd">${prods.map(s => `<option value="${esc(s)}">`).join('')}</datalist>
+    <div class="sumbar"><div id="edSum"></div><button class="cta" id="edSave">Zapisz paragon</button></div>`;
+  updateEdSum();
+}
+
+function updateEdSum() {
+  const r = ed.r, s = itemsSum(r), diff = r2(s - r.total);
+  const bad = r.items.some(itemBad);
+  const dup = allReceipts().find(x => x.id !== r.id && x.date === r.date && Math.abs(x.total - r.total) < 0.005 && (x.shop || '').toLowerCase() === (r.shop || '').toLowerCase());
+  let h = Math.abs(diff) < 0.005
+    ? `<div class="row"><span class="g">✓ Suma pozycji zgadza się z paragonem</span><b class="num">${zl(s)} zł</b></div>`
+    : `<div class="row"><span class="r">Suma pozycji ${zl(s)} ≠ paragon ${zl(r.total)}</span><b class="num r">${diff > 0 ? '+' : ''}${zl(diff)}</b></div>`;
+  if (bad) h += `<div class="r small">Niektóre pozycje mają braki (czerwona ramka).</div>`;
+  if (ed.confirm === 'sum') h += msgHtml('warn', 'Suma się nie zgadza. Dotknij „Zapisz” jeszcze raz, żeby zapisać mimo to.');
+  if (ed.confirm === 'dup' || (dup && ed.isNew)) h += msgHtml('warn', `Taki paragon już jest (${esc(dup ? dup.shop : '')}, ${dup ? dm(dup.date) : ''}, ${dup ? zl(dup.total) : ''} zł).` + (ed.confirm === 'dup' ? ' Dotknij „Zapisz” jeszcze raz, żeby dodać go drugi raz.' : ''));
+  $('edSum').innerHTML = h;
+}
+
+function edRefreshItem(k) {
+  const it = ed.r.items[k];
+  const set = (sel, html) => { const el = $('scrEdit').querySelector(sel); if (el) el.innerHTML = html; };
+  set(`[data-lblnet="${k}"]`, zl(it.net));
+  set(`[data-lblcat="${k}"]`, esc(it.cat));
+  set(`[data-lblcalc="${k}"]`, itemCalcText(it));
+  const box = $('scrEdit').querySelector(`.it[data-k="${k}"]`);
+  if (box) box.classList.toggle('bad', itemBad(it));
+  const nm = box && box.querySelector(`[data-lblname="${k}"]`);
+  if (nm) nm.textContent = it.name || 'nowa pozycja';
+  updateEdSum();
+}
+
+function edInput(e) {
+  const t = e.target;
+  const r = ed.r;
+  const hdr = { edShop: 'shop', edDate: 'date', edTime: 'time', edPlace: 'place', edPay: 'pay' };
+  if (hdr[t.id]) { r[hdr[t.id]] = t.value; ed.confirm = null; updateEdSum(); return; }
+  if (t.id === 'edTotal') { r.total = r2(num(t.value)); ed.confirm = null; updateEdSum(); return; }
+  const box = t.closest('.it'); if (!box || !t.dataset.f) return;
+  const k = +box.dataset.k, it = r.items[k], f = t.dataset.f;
+  if (f === 'name' || f === 'prod' || f === 'cat' || f === 'unit' || f === 'sizeU') it[f] = t.value;
+  else it[f] = num(t.value);
+  if (f === 'qty' || f === 'price') it.gross = r2(it.qty * it.price);
+  if (f === 'cat' && e.type === 'change') delete it.note;
+  calcItem(it);
+  ed.confirm = null;
+  edRefreshItem(k);
+}
+
+function edClick(e) {
+  const t = e.target.closest('button, .bar1');
+  if (!t) return;
+  const r = ed.r;
+  if (t.id === 'edBack') { ed = null; return startMain(); }
+  if (t.id === 'edAdd') { r.items.push(blankItem()); ed.open.add(r.items.length - 1); renderEditor(); const last = $('edItems').lastElementChild; if (last) last.scrollIntoView({ block: 'center' }); return; }
+  if (t.dataset.tog != null) { const k = +t.dataset.tog; ed.open.has(k) ? ed.open.delete(k) : ed.open.add(k); renderEditor(); return; }
+  if (t.dataset.delitem != null) {
+    const k = +t.dataset.delitem;
+    if (t.dataset.sure !== '1') { t.dataset.sure = '1'; t.textContent = 'Na pewno usunąć?'; return; }
+    r.items.splice(k, 1);
+    ed.open = new Set([...ed.open].filter(x => x !== k).map(x => x > k ? x - 1 : x));
+    renderEditor(); return;
+  }
+  if (t.dataset.dupitem != null) {
+    const k = +t.dataset.dupitem;
+    r.items.splice(k + 1, 0, JSON.parse(JSON.stringify(r.items[k])));
+    ed.open = new Set([...ed.open].map(x => x > k ? x + 1 : x)); ed.open.add(k + 1);
+    renderEditor(); return;
+  }
+  if (t.id === 'edSave') return edSave();
+}
+
+function edSave() {
+  const r = ed.r;
+  r.shop = r.shop.trim();
+  if (!r.shop || !/^\d{4}-\d{2}-\d{2}$/.test(r.date)) { ed.confirm = null; $('edSum').innerHTML = msgHtml('err', 'Uzupełnij sklep i datę.'); return; }
+  if (!r.items.length) { $('edSum').innerHTML = msgHtml('err', 'Paragon nie ma pozycji.'); return; }
+  if (r.items.some(itemBad)) { $('edSum').innerHTML = msgHtml('err', 'Uzupełnij pozycje w czerwonych ramkach (nazwa, ilość).'); return; }
+  const diffOk = Math.abs(itemsSum(r) - r.total) < 0.005;
+  const dup = ed.isNew && allReceipts().some(x => x.id !== r.id && x.date === r.date && Math.abs(x.total - r.total) < 0.005 && (x.shop || '').toLowerCase() === r.shop.toLowerCase());
+  if (!diffOk && !ed.confirm) { ed.confirm = 'sum'; updateEdSum(); return; }
+  if (dup && ed.confirm !== 'dup') { ed.confirm = 'dup'; updateEdSum(); return; }
+  r.items.forEach(calcItem);
+  delete r.warnings;
+  const base = ed.base;
+  ui.ym = ymOf(r.date); lsSet(LS_UI, ui);
+  openRc = r.id;
+  ed = null;
+  queue({ op: 'save', receipt: r, base });
+  toast('Zapisano');
+  ui.tab = 'p';
+  startMain();
+  setTab('p');
+}
+
+// ---------- panel admina ----------
+async function showAdmin(note) {
+  showScreen('scrAdmin');
+  const el = $('scrAdmin');
+  el.innerHTML = `<div class="pagehead"><button class="btn2" id="adBack">‹ Wróć</button><h2>Panel admina</h2></div><div class="card busy"><div class="spin"></div><span class="muted">Wczytuję…</span></div>`;
+  $('adBack').onclick = () => startMain();
+  let out = null;
+  try { out = await api('admin.list'); } catch (e) {}
+  if (!out || !out.ok) { el.querySelector('.card').outerHTML = msgHtml('err', 'Brak połączenia z Arkuszem.'); return; }
+  hasKey = out.hasKey;
+  renderAdmin(out.users, note);
+}
+
+function renderAdmin(users, note) {
+  const el = $('scrAdmin');
+  const status = u => !u.active ? '<span class="chip">wyłączone</span>' : u.locked ? '<span class="chip err">zablokowane</span>' : u.hasPin ? '<span class="chip ok">PIN ustawiony</span>' : '<span class="chip warn">czeka na PIN z maila</span>';
+  const me = auth.user.id;
+  el.innerHTML = `<div class="pagehead"><button class="btn2" id="adBack">‹ Wróć</button><h2>Panel admina</h2></div>
+    ${note ? note : ''}
+    <div class="card stack"><p class="h">Konta</p>
+      ${users.map(u => `<div class="stack" style="border-bottom:1px solid var(--line);padding-bottom:10px">
+        <div class="row"><span><b>${esc(u.name)}</b> <span class="muted">(${esc(u.id)}${u.role === 'admin' ? ', admin' : ''})</span></span>${status(u)}</div>
+        <div class="muted small">${esc(u.email || 'brak e-maila')}</div>
+        <div class="rcact" style="justify-content:flex-start">
+          ${u.active && u.email ? `<button class="btn2 sm" data-ad="sendLink" data-id="${esc(u.id)}">✉ ${u.hasPin ? 'Wyślij link do nowego PIN-u' : 'Wyślij zaproszenie ponownie'}</button>` : ''}
+          ${u.locked ? `<button class="btn2 sm" data-ad="unlock" data-id="${esc(u.id)}">Odblokuj</button>` : ''}
+          <button class="btn2 sm" data-ad="email" data-id="${esc(u.id)}">Zmień e-mail</button>
+          ${u.id !== me ? `<button class="btn2 sm ${u.active ? 'danger' : ''}" data-ad="active" data-id="${esc(u.id)}" data-v="${u.active ? '0' : '1'}">${u.active ? 'Wyłącz' : 'Włącz'}</button>` : ''}
+        </div>
+        <div data-emailbox="${esc(u.id)}" hidden class="grid2"><input type="email" placeholder="nowy e-mail" value="${esc(u.email)}"><button class="btn2 sm" data-ad="saveEmail" data-id="${esc(u.id)}">Zapisz</button></div>
+      </div>`).join('')}
+      <p class="h" style="margin-top:6px">Dodaj osobę</p>
+      <div class="grid2"><label class="f">Login (skrót)<input id="nuId" autocapitalize="characters" maxlength="6" placeholder="np. AF"></label><label class="f">Imię<input id="nuName" maxlength="40"></label></div>
+      <label class="f">E-mail (tu przyjdzie link do ustawienia PIN-u)<input id="nuEmail" type="email" autocapitalize="off"></label>
+      <button class="cta" data-ad="create">Dodaj i wyślij zaproszenie</button>
+    </div>
+    <div class="card stack"><p class="h">Odczyt paragonów (Claude)</p>
+      <div>${hasKey ? '<span class="chip ok">klucz ustawiony</span>' : '<span class="chip err">brak klucza — odczyt zdjęć wyłączony</span>'}</div>
+      <div class="muted small">Klucz API z console.anthropic.com (zaczyna się od sk-ant-). Trafia tylko do ustawień skryptu w Twoim Arkuszu — nie widać go w appce ani w repozytorium.</div>
+      <input id="adKey" type="password" autocomplete="off" placeholder="sk-ant-…">
+      <div class="grid2"><button class="btn2" data-ad="key">Zapisz klucz</button>${hasKey ? '<button class="btn2 danger" data-ad="keyDel">Usuń klucz</button>' : '<span></span>'}</div>
+    </div>
+    <div class="card stack"><p class="h">Import paragonów z pliku</p>
+      <div class="muted small">Plik .json z paragonami (np. przygotowany przez Claude na czacie). Paragony, które już są, zostaną pominięte.</div>
+      <label class="btn2" style="position:relative;overflow:hidden;text-align:center">Wybierz plik .json<input type="file" id="adImport" accept=".json,application/json" style="position:absolute;inset:0;opacity:0;font-size:200px"></label>
+    </div>`;
+  $('adBack').onclick = () => startMain();
+  $('adImport').onchange = e => adminImport(e.target.files[0]);
+  el.onclick = e => adminClick(e, users);
+}
+
+async function adminClick(e, users) {
+  const t = e.target.closest('[data-ad]');
+  if (!t) return;
+  const a = t.dataset.ad, id = t.dataset.id;
+  const done = (out, okText) => {
+    if (out && out.ok) {
+      const warn = out.sent === false ? msgHtml('err', 'Konto zapisane, ale mail się nie wysłał (limit Google albo zły adres). Spróbuj „Wyślij” później.') : msgHtml('ok', okText);
+      if (out.users) renderAdmin(out.users, warn); else showAdmin(warn);
+    } else {
+      const why = { exists: 'taki login już jest', bad: 'sprawdź dane', badkey: 'to nie wygląda na klucz Claude (sk-ant-…)' }[out && out.error] || 'brak połączenia';
+      $('scrAdmin').insertAdjacentHTML('afterbegin', msgHtml('err', 'Nie udało się: ' + why + '.'));
+      window.scrollTo(0, 0);
+    }
+  };
+  try {
+    if (a === 'sendLink') done(await api('admin.sendLink', { id }), 'Wysłano link na e-mail.');
+    else if (a === 'unlock') done(await api('admin.unlock', { id }), 'Odblokowano.');
+    else if (a === 'active') done(await api('admin.setActive', { id, active: t.dataset.v === '1' }), t.dataset.v === '1' ? 'Konto włączone.' : 'Konto wyłączone (dane zostają).');
+    else if (a === 'email') { const b = $('scrAdmin').querySelector(`[data-emailbox="${id}"]`); b.hidden = !b.hidden; }
+    else if (a === 'saveEmail') { const v = $('scrAdmin').querySelector(`[data-emailbox="${id}"] input`).value.trim(); done(await api('admin.setEmail', { id, email: v }), 'E-mail zmieniony.'); }
+    else if (a === 'create') {
+      const nid = $('nuId').value.trim().toUpperCase(), name = $('nuName').value.trim(), email = $('nuEmail').value.trim();
+      if (!/^[A-Z]{1,6}$/.test(nid) || !name || !/@/.test(email)) { $('scrAdmin').insertAdjacentHTML('afterbegin', msgHtml('err', 'Uzupełnij login (1–6 liter), imię i e-mail.')); window.scrollTo(0, 0); return; }
+      done(await api('admin.createUser', { id: nid, name, email }), `Dodano ${esc(name)}. Zaproszenie z linkiem do ustawienia PIN-u poszło na ${esc(email)}.`);
+    }
+    else if (a === 'key' || a === 'keyDel') {
+      const key = a === 'key' ? $('adKey').value.trim() : '';
+      if (a === 'key' && !key) return;
+      const out = await api('admin.setApiKey', { key });
+      if (out && out.ok) { hasKey = out.hasKey; showAdmin(msgHtml('ok', out.hasKey ? 'Klucz zapisany — odczyt paragonów włączony.' : 'Klucz usunięty.')); }
+      else done(out);
+    }
+  } catch (err) { done(null); }
+}
+
+async function adminImport(file) {
+  if (!file) return;
+  let data;
+  try { data = JSON.parse(await file.text()); } catch (e) { return showAdmin(msgHtml('err', 'To nie jest poprawny plik .json.')); }
+  const list = (Array.isArray(data) ? data : data.receipts || []).map(normalizeImported).filter(Boolean);
+  if (!list.length) return showAdmin(msgHtml('err', 'W pliku nie ma paragonów.'));
+  try {
+    const out = await api('admin.import', { receipts: list });
+    if (!out.ok) return showAdmin(msgHtml('err', 'Import się nie udał (' + esc(out.error) + ').'));
+    await sync();
+    showAdmin(msgHtml('ok', `Zaimportowano ${out.added} paragon(ów)` + (out.skipped ? `, pominięto ${out.skipped} (już były albo błędne).` : '.')));
+  } catch (e) { showAdmin(msgHtml('err', 'Brak połączenia z Arkuszem.')); }
+}
+
+// Paragony z pliku: uzupełniamy gramaturę z ceny za kg/l (starszy format miał tylko ppu).
+function normalizeImported(x) {
+  if (!x || !Array.isArray(x.items) || !/^\d{4}-\d{2}-\d{2}$/.test(x.date || '')) return null;
+  const r = { id: /^[A-Za-z0-9_\-]{6,64}$/.test(x.id || '') ? x.id : newId(), shop: String(x.shop || ''), place: String(x.place || ''), date: x.date, time: String(x.time || ''),
+    total: r2(x.total), pay: String(x.pay || ''), source: x.source || 'import' };
+  r.items = x.items.map(i => {
+    const it = { name: String(i.name || ''), prod: String(i.prod || ''), cat: CATS.includes(i.cat) ? i.cat : 'Kwiaty i inne', qty: Number(i.qty) || 1, unit: i.unit === 'kg' ? 'kg' : 'szt',
+      price: Number(i.price) || 0, gross: Number(i.gross != null ? i.gross : i.net) || 0, disc: Number(i.disc) || 0, size: Number(i.size) || 0, sizeU: i.sizeU || '' };
+    if (!it.size && it.unit !== 'kg' && i.ppu && i.ppuU) {
+      it.size = Math.round((Number(i.net) / it.qty / i.ppu) * 1000) / 1000; it.sizeU = i.ppuU.replace('zł/', '');
+    }
+    if (i.note) it.note = String(i.note);
+    return calcItem(it);
+  });
+  return r;
+}
+
+// ---------- zdarzenia ----------
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => setTab(b.dataset.t));
+$('mPrev').onclick = () => { ui.ym = shiftYm(ui.ym, -1); lsSet(LS_UI, ui); openRc = null; renderMain(); };
+$('mNext').onclick = () => { ui.ym = shiftYm(ui.ym, 1); lsSet(LS_UI, ui); openRc = null; renderMain(); };
+$('fileIn').onchange = e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) onFiles(f); };
+$('btnManual').onclick = () => openEditor({ id: newId(), shop: '', place: '', date: new Date().toISOString().slice(0, 10), time: '', total: 0, pay: '', items: [], source: 'manual' }, true);
+$('rcList').onclick = e => {
+  const t = e.target.closest('[data-rc],[data-edit],[data-del],[data-delyes],[data-delno]');
+  if (!t) return;
+  if (t.dataset.rc) { openRc = openRc === t.dataset.rc ? null : t.dataset.rc; pendingDelete = null; return renderReceipts(); }
+  if (t.dataset.edit) { const r = allReceipts().find(x => x.id === t.dataset.edit); if (r) openEditor(r, false); return; }
+  if (t.dataset.del) { pendingDelete = t.dataset.del; return renderReceipts(); }
+  if (t.dataset.delno) { pendingDelete = null; return renderReceipts(); }
+  if (t.dataset.delyes) { const id = t.dataset.delyes; pendingDelete = null; openRc = null; queue({ op: 'delete', id }); toast('Usunięto'); }
+};
+$('t-c').onclick = e => { const t = e.target.closest('[data-prod]'); if (!t) return; openProd = openProd === t.dataset.prod ? null : t.dataset.prod; renderPrices(); };
+$('scrEdit').addEventListener('input', e => { if (ed) edInput(e); });
+$('scrEdit').addEventListener('change', e => { if (ed && e.target.tagName === 'SELECT') edInput(e); });
+$('scrEdit').addEventListener('click', e => { if (ed) edClick(e); });
+$('userBtn').onclick = e => { e.stopPropagation(); $('menu').hidden = !$('menu').hidden; };
+document.addEventListener('click', e => { if (!e.target.closest('#menu')) $('menu').hidden = true; });
+$('menu').onclick = async e => {
+  const m = e.target.closest('[data-m]'); if (!m) return;
+  $('menu').hidden = true;
+  if (m.dataset.m === 'pin') showChangePin();
+  else if (m.dataset.m === 'admin') showAdmin();
+  else if (m.dataset.m === 'refresh') { toast('Odświeżam…'); await sync(); toast('Dane aktualne'); }
+  else if (m.dataset.m === 'logout') {
+    try { await api('logout'); } catch (err) {}
+    logoutLocal();
+    cache = { receipts: [] }; outbox = []; lsDel(LS_CACHE); lsDel(LS_OUTBOX);
+    showAuth();
+  }
+};
+window.addEventListener('online', () => sync());
+document.addEventListener('visibilitychange', () => { if (!document.hidden && auth && !$('scrMain').hidden) sync(); });
+
+// Dyskretny test połączenia — 10 sekund diagnozy zamiast zgadywania.
+$('btnTest').onclick = async () => {
+  try {
+    const t0 = Date.now();
+    const out = await api('status');
+    alert('Połączenie OK (' + (Date.now() - t0) + ' ms)\nOdpowiedź: ' + JSON.stringify(out));
+  } catch (err) { alert('Brak połączenia: ' + err.message + '\nAdres: ' + GAS_URL); }
+};
+
+// ---------- start ----------
+(function start() {
+  setTab(ui.tab || 'p');
+  checkConnection();
+  const link = new URLSearchParams(location.search).get('pin');
+  if (link) return showSetPin(link);
+  if (auth && auth.token && (!auth.expires || auth.expires > Date.now())) return startMain();
+  showAuth();
+})();
+</script>
+</body>
+</html>
