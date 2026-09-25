@@ -11,7 +11,7 @@ env:
   # Istniejące wdrożenie Web App — to samo ID co w GAS_URL w index.html
   # (jawne, nie jest sekretem). URL /exec ma zostać bez zmian.
   # Dopóki jest tu USTAW_PO_PIERWSZYM_WDROZENIU, workflow tylko informuje i kończy się sukcesem.
-  GAS_DEPLOYMENT_ID: USTAW_PO_PIERWSZYM_WDROZENIU
+  GAS_DEPLOYMENT_ID: AKfycby-n1t8ehXtz9sNEByK-dZbObSAs39RKOovANpGIefLbs2-spAlx1iwdFb9CUK5fVZH
 
 jobs:
   deploy:

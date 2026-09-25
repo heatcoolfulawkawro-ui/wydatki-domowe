@@ -19,7 +19,12 @@ Wzorzec architektury i pułapki: skill `ra-ster-mini-app` (ten sam układ co kar
   atrapa Gemini API (wywołania w `/__ai`). `node tools/sandbox.js index.html Kod.gs [atrapa-odczytu.json] [port]`
   (domyślnie port 4280; NIE 4190 — przeglądarki/`fetch` blokują ten port).
 
-## Pierwsze wdrożenie (STAN 25.09.2026: kod gotowy, backend jeszcze NIE wdrożony)
+## Pierwsze wdrożenie (ZROBIONE 25.09.2026 — kroki 1–7; krok 8 robi Szef)
+
+scriptId `1oqqal0qhfIvUrvbTBjofAv2UZZq_wZdVBB6dLYrZur_Wdw-bWmRgI9nF` (`.clasp.json` w repo — potrzebny w CI),
+deploymentId `AKfycby-n1t8ehXtz9sNEByK-dZbObSAs39RKOovANpGIefLbs2-spAlx1iwdFb9CUK5fVZH`. Uwagi z wdrożenia:
+`clasp create` nadpisał `appsscript.json` (America/New_York, bez `webapp`) — przywrócono nasz. HTTP 403
+„Odmowa dostępu” z `/exec` = właściciel nie przyznał jeszcze uprawnień (`autoryzuj` → Zezwól do końca).
 
 Do zrobienia na PC Szefa (tam są zalogowane `clasp` i `gh`), w tej kolejności:
 1. `clasp create --type sheets --title "Wydatki domowe — dane" --rootDir .` w katalogu repo
@@ -81,7 +86,7 @@ Do zrobienia na PC Szefa (tam są zalogowane `clasp` i `gh`), w tej kolejności:
 - `prod` = „produkt porównawczy” (np. „Twarożek Grani 200 g”, „Banany”) — po nim idzie porównanie
   cen między sklepami. Zmiana nazw kategorii/produktów = migracja istniejących danych.
 
-## Funkcje (stan: 25.09.2026, v0.1 — niewdrożona)
+## Funkcje (stan: 25.09.2026, v0.1 — wdrożona)
 
 - Logowanie: skrót + PIN 6 cyfr, sesja 60 dni; PIN ustawia właściciel przez jednorazowy link z maila
   (48 h): zaproszenie od admina albo „Nie pamiętam PIN-u” (max 1 mail/min/konto, odpowiedź nie zdradza,
