@@ -1,6 +1,6 @@
 # Wydatki domowe — pamięć projektu
 
-Domowa appka webowa do paragonów: wrzucasz zdjęcie / zrzut z aplikacji sklepu / PDF, Claude
+Domowa appka webowa do paragonów: wrzucasz zdjęcie / zrzut z aplikacji sklepu / PDF, Gemini
 odczytuje pozycje, appka robi narastające zestawienie (miesiąc, kategorie, sklepy) i porównuje
 ceny tych samych produktów między sklepami. Używają jej dwie osoby (Szef + żona), głównie na
 iPhonie. Z użytkownikiem rozmawiaj po polsku („Szefie”); to inżynier, nie programista — tłumacz
@@ -16,7 +16,7 @@ Wzorzec architektury i pułapki: skill `ra-ster-mini-app` (ten sam układ co kar
 - **Web App URL** (stała `GAS_URL` w `index.html`) — po pierwszym wdrożeniu NIE MOŻE się zmienić.
 - `.claspignore` — clasp wypycha tylko `Kod.gs` i `appsscript.json`.
 - `tools/sandbox.js` — serwer testowy: prawdziwy `Kod.gs` na atrapie Arkusza, maile do `/__mail`,
-  atrapa Claude API. `node tools/sandbox.js index.html Kod.gs [atrapa-odczytu.json] [port]`
+  atrapa Gemini API (wywołania w `/__ai`). `node tools/sandbox.js index.html Kod.gs [atrapa-odczytu.json] [port]`
   (domyślnie port 4280; NIE 4190 — przeglądarki/`fetch` blokują ten port).
 
 ## Pierwsze wdrożenie (STAN 25.09.2026: kod gotowy, backend jeszcze NIE wdrożony)
@@ -40,8 +40,8 @@ Do zrobienia na PC Szefa (tam są zalogowane `clasp` i `gh`), w tej kolejności:
    (albo Settings → Pages → main / root). Sprawdź `gh api repos/heatcoolfulawkawro-ui/wydatki-domowe/pages`.
 7. Push → `gh run watch` (Deployed … @N pod tym samym ID), `GET <GAS_URL>` → HTTP 200 z pustą treścią.
 8. Szef otwiera appkę → ekran „Pierwsze uruchomienie” → konto admina PF → link do ustawienia PIN-u
-   przychodzi na e-mail właściciela skryptu. Potem w Panelu admina: klucz Claude (console.anthropic.com,
-   `sk-ant-…`, z doładowanym saldem), konto żony (skrót + imię + e-mail → zaproszenie mailem),
+   przychodzi na e-mail właściciela skryptu. Potem w Panelu admina: klucz Gemini (`AIza…` — ten sam co w Paliwo-PF,
+   z Właściwości skryptu tamtego projektu albo z aistudio.google.com; konto płatne, nie trzeba doładowywać), konto żony (skrót + imię + e-mail → zaproszenie mailem),
    import pliku `paragony.json` (5 paragonów z września odczytanych na czacie 25.09.2026 — plik ma Szef,
    NIE ma go w repo).
 
@@ -56,8 +56,8 @@ Do zrobienia na PC Szefa (tam są zalogowane `clasp` i `gh`), w tej kolejności:
 ## Zasady przy zmianach
 
 - Repo jest PUBLICZNE (darmowe Pages). Żadnych danych z paragonów, adresów e-mail, PIN-ów ani
-  kluczy w repo. Klucz Claude leży tylko we właściwościach skryptu (`ANTHROPIC_API_KEY`), wpisuje
-  go admin w appce; nigdy nie trafia do przeglądarki.
+  kluczy w repo. Klucz Gemini leży tylko we właściwościach skryptu (`GEMINI_API_KEY`), wpisuje
+  go admin w appce; wysyłany w nagłówku `x-goog-api-key` (nie w adresie URL); nigdy nie trafia do przeglądarki.
 - Przed widoczną zmianą UI pokaż makietę do akceptacji.
 - Po każdej zmianie JS: `node <skill>/scripts/check-js.js index.html` i `node --check` na kopii `Kod.gs` jako `.js`.
 - Testuj w `tools/sandbox.js`, nigdy na prawdziwym Arkuszu.
@@ -71,7 +71,7 @@ Do zrobienia na PC Szefa (tam są zalogowane `clasp` i `gh`), w tej kolejności:
 - Zakładka `Receipts`: wiersz = paragon; kolumny `id, date, shop, total, json, addedBy, createdAt,
   updatedBy, updatedAt, deleted`. Usuwanie = `deleted=TRUE` (wiersz zostaje).
 - JSON paragonu: `{id, shop, place, date:'RRRR-MM-DD', time, total (do zapłaty, z kaucjami), pay,
-  source:'claude'|'manual'|'import', items:[{name, prod, cat, qty, unit:'szt'|'kg', price, gross
+  source:'ai'|'manual'|'import', items:[{name, prod, cat, qty, unit:'szt'|'kg', price, gross
   (przed rabatem), disc (dodatni), net, size, sizeU:'kg'|'l'|'', ppu?, ppuU?, note?}], addedBy,
   createdAt, updatedBy, updatedAt}`. `net`, `ppu` liczy `calcItem` w appce.
 - Kategorie (stała `CATS`): jedzenie = Mięso i wędliny, Ryby, Nabiał i jaja, Pieczywo, Warzywa i
@@ -88,8 +88,10 @@ Do zrobienia na PC Szefa (tam są zalogowane `clasp` i `gh`), w tej kolejności:
   czy konto istnieje). Blokada 5 błędów → 5 min, podwajana do 24 h. Pierwsze uruchomienie: konto admina,
   link idzie tylko na e-mail właściciela skryptu. Dane wspólne dla domu, zapis kto dodał/zmienił.
 - Dodaj paragon: zdjęcia/zrzuty/PDF (kilka naraz) → długie zrzuty cięte na kawałki 760×1400 z zakładką →
-  `parse` w Kod.gs → Claude (`claude-opus-5`, effort low, structured output JSON, `fallbacks: default`)
-  → edytor do sprawdzenia. Do promptu idą podpowiedzi z historii (nazwa → kategoria/produkt),
+  `parse` w Kod.gs → Gemini (`gemini-flash-latest`, zapasowo `gemini-3.6-flash`; model, który zadziałał,
+  zapamiętany w `GEMINI_MODEL_OK`; temperature 0, `responseMimeType: application/json`, kształt JSON
+  opisany w prompcie — wzorzec z Paliwo-PF) → edytor do sprawdzenia. Szef wybrał Gemini zamiast Claude
+  API (25.09.2026): ma już płatne konto Google i klucz. Do promptu idą podpowiedzi z historii (nazwa → kategoria/produkt),
   a po odczycie słownik z historii nadpisuje kategorię znanych nazw.
 - Edytor: pozycje jako zwijane paski, suma kontrolna (pozycje vs „do zapłaty”) na dole, ostrzeżenie
   o duplikacie (ten sam sklep+data+kwota), zapis z niezgodną sumą wymaga drugiego dotknięcia.
@@ -98,14 +100,14 @@ Do zrobienia na PC Szefa (tam są zalogowane `clasp` i `gh`), w tej kolejności:
   po dotknięciu; „ta sama rzecz, różne ceny”).
 - Offline: bufor w localStorage + kolejka zmian wysyłana po powrocie sieci; konflikt (ktoś zmienił
   paragon w międzyczasie) → wygrywa nowsza wersja z serwera.
-- Panel admina: konta (dodaj z e-mailem, wyślij link, odblokuj, zmień e-mail, wyłącz), klucz Claude,
+- Panel admina: konta (dodaj z e-mailem, wyślij link, odblokuj, zmień e-mail, wyłącz), klucz Gemini,
   import paragonów z pliku .json.
 
 ## Otwarte tematy
 
-- Nic z tego nie było jeszcze testowane na prawdziwym Apps Script ani z prawdziwym Claude API
+- Nic z tego nie było jeszcze testowane na prawdziwym Apps Script ani z prawdziwym Gemini API
   (tylko sandbox + atrapy). Po wdrożeniu: sprawdzić czas odczytu długiego paragonu (UrlFetchApp ma
-  limit czasu — jeśli będzie za wolno, rozważyć `effort` niżej albo inny model po zgodzie Szefa).
+  limit czasu — jeśli będzie za wolno, rozważyć inny model po zgodzie Szefa).
 - Szef ma potwierdzić: 2 paczki parówek na paragonie Biedronki 18.09, co to „Lunchbox 250g” (Lidl 08.09),
   pomidory kiść 500 g za 14,99 zł.
 - Pomysły na później: budżet miesięczny, wykresy trendu cen produktu, eksport do Excela.

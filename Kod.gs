@@ -9,8 +9,9 @@
 // Dane: jeden wiersz = jeden paragon (zakładka Receipts, kolumna json). Dane są wspólne dla
 // całego domu — każdy zalogowany widzi i edytuje wszystkie paragony; zapisujemy, kto dodał/zmienił.
 //
-// Odczyt paragonu: akcja parse wysyła zdjęcia/PDF do Claude API (klucz w ANTHROPIC_API_KEY we
+// Odczyt paragonu: akcja parse wysyła zdjęcia/PDF do Gemini API (klucz w GEMINI_API_KEY we
 // właściwościach skryptu — admin wpisuje go w appce, nigdy nie trafia do repo ani do przeglądarki).
+// Wzorzec wywołania ten sam co w Paliwo-PF (działa u Szefa na płatnym koncie Google).
 
 const APP_URL = 'https://heatcoolfulawkawro-ui.github.io/wydatki-domowe/';
 const APP_NAME = 'Wydatki domowe';
@@ -35,8 +36,10 @@ const LOCK_BASE_MS = 5 * 60 * 1000;
 const LOCK_MAX_MS = 24 * 3600 * 1000;
 const MAX_RECEIPT_CHARS = 100000;
 
-const CLAUDE_MODEL = 'claude-opus-5';
-const CLAUDE_URL = 'https://api.anthropic.com/v1/messages';
+// "gemini-flash-latest" to ruchomy alias Google na aktualny model flash; reszta to zapasowe nazwy.
+// Model, który ostatnio zadziałał, jest zapamiętywany we właściwości GEMINI_MODEL_OK.
+const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-3.6-flash'];
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/';
 const MAX_PARSE_FILES = 8;
 const MAX_PARSE_B64 = 20 * 1024 * 1024;
 
@@ -267,11 +270,12 @@ function adminSetApiKey_(b) {
   const key = String(b.key || '').trim();
   const props = PropertiesService.getScriptProperties();
   if (!key) {
-    props.deleteProperty('ANTHROPIC_API_KEY');
+    props.deleteProperty('GEMINI_API_KEY');
     return { ok: true, hasKey: false };
   }
-  if (!/^sk-ant-[A-Za-z0-9_\-]{20,300}$/.test(key)) return fail_('badkey');
-  props.setProperty('ANTHROPIC_API_KEY', key);
+  if (!/^AIza[0-9A-Za-z_\-]{30,60}$/.test(key)) return fail_('badkey');
+  props.setProperty('GEMINI_API_KEY', key);
+  props.deleteProperty('GEMINI_MODEL_OK');
   return { ok: true, hasKey: true };
 }
 
@@ -417,7 +421,7 @@ function adminImport_(admin, b) {
   return { ok: true, added: added, skipped: skipped };
 }
 
-// ---------- odczyt paragonu przez Claude ----------
+// ---------- odczyt paragonu przez Gemini ----------
 
 function parseEntry_(b) {
   const auth = authenticate_(b.token);
@@ -427,94 +431,74 @@ function parseEntry_(b) {
   const files = Array.isArray(b.files) ? b.files : [];
   if (!files.length || files.length > MAX_PARSE_FILES) return fail_('bad');
   let size = 0;
-  const content = [];
+  const parts = [{ text: parsePrompt_(b.categories, b.hints, files.length) }];
   for (let i = 0; i < files.length; i++) {
     const f = files[i] || {};
     const data = String(f.data || '');
     size += data.length;
     if (!data || size > MAX_PARSE_B64 || /[^A-Za-z0-9+/=]/.test(data)) return fail_('bad');
-    if (f.type === 'application/pdf') {
-      content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: data } });
-    } else if (f.type === 'image/jpeg' || f.type === 'image/png') {
-      content.push({ type: 'image', source: { type: 'base64', media_type: f.type, data: data } });
-    } else {
-      return fail_('bad');
-    }
+    if (f.type !== 'application/pdf' && f.type !== 'image/jpeg' && f.type !== 'image/png') return fail_('bad');
+    parts.push({ inline_data: { mime_type: f.type, data: data } });
   }
-  content.push({ type: 'text', text: parsePrompt_(b.categories, b.hints, files.length) });
-  const req = {
-    model: CLAUDE_MODEL,
-    max_tokens: 16000,
-    fallbacks: 'default',
-    output_config: { effort: 'low', format: { type: 'json_schema', schema: RECEIPT_SCHEMA_ } },
-    messages: [{ role: 'user', content: content }]
-  };
-  const res = UrlFetchApp.fetch(CLAUDE_URL, {
-    method: 'post',
-    contentType: 'application/json',
-    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'server-side-fallback-2026-07-01' },
-    payload: JSON.stringify(req),
-    muteHttpExceptions: true
+  const payload = JSON.stringify({
+    contents: [{ parts: parts }],
+    generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 32768 }
   });
-  const codeHttp = res.getResponseCode();
-  let body;
-  try {
-    body = JSON.parse(res.getContentText());
-  } catch (err) {
-    return fail_('claude', { status: codeHttp });
+  const props = PropertiesService.getScriptProperties();
+  const models = GEMINI_MODELS.slice();
+  const cached = props.getProperty('GEMINI_MODEL_OK');
+  if (cached) {
+    const k = models.indexOf(cached);
+    if (k >= 0) models.splice(k, 1);
+    models.unshift(cached);
   }
-  if (codeHttp !== 200) {
-    const msg = body && body.error ? String(body.error.type || '') + ': ' + String(body.error.message || '') : '';
-    console.error('Claude API ' + codeHttp + ' ' + msg);
-    return fail_('claude', { status: codeHttp, detail: msg.slice(0, 300) });
+  let lastError = 'nieznany błąd';
+  for (let i = 0; i < models.length; i++) {
+    let res;
+    try {
+      res = UrlFetchApp.fetch(GEMINI_URL + models[i] + ':generateContent', {
+        method: 'post',
+        contentType: 'application/json',
+        headers: { 'x-goog-api-key': key },
+        payload: payload,
+        muteHttpExceptions: true
+      });
+    } catch (err) {
+      lastError = models[i] + ': ' + err.message;
+      continue;
+    }
+    const status = res.getResponseCode();
+    let body;
+    try {
+      body = JSON.parse(res.getContentText());
+    } catch (err) {
+      lastError = models[i] + ': HTTP ' + status;
+      continue;
+    }
+    if (status !== 200) {
+      lastError = models[i] + ': ' + (body.error ? body.error.message : 'HTTP ' + status);
+      console.error('Gemini ' + lastError);
+      // Zły klucz / brak uprawnień / limit — inny model nic nie pomoże.
+      if ((status === 400 && /API key/i.test(lastError)) || status === 401 || status === 403 || status === 429) break;
+      continue;
+    }
+    props.setProperty('GEMINI_MODEL_OK', models[i]);
+    const cand = body.candidates && body.candidates[0];
+    if (!cand || !cand.content) return fail_('ai', { detail: 'brak odpowiedzi' + (body.promptFeedback ? ' (' + body.promptFeedback.blockReason + ')' : '') });
+    if (cand.finishReason === 'MAX_TOKENS') return fail_('ai', { detail: 'paragon za długi — podziel go na dwie części' });
+    const text = (cand.content.parts || []).filter(function (p) { return p.text && !p.thought; }).map(function (p) { return p.text; }).join('')
+      .replace(/^\s*```(?:json)?\s*/, '').replace(/\s*```\s*$/, '');
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (err) {
+      return fail_('ai', { detail: 'odpowiedź nie jest JSON-em' });
+    }
+    if (!parsed || !Array.isArray(parsed.items)) return fail_('ai', { detail: 'brak listy pozycji' });
+    return { ok: true, receipt: parsed, model: models[i], usage: body.usageMetadata || null };
   }
-  if (body.stop_reason === 'refusal') return fail_('claude', { detail: 'refusal' });
-  if (body.stop_reason === 'max_tokens') return fail_('claude', { detail: 'max_tokens' });
-  const text = (body.content || []).filter(function (c) { return c.type === 'text'; }).map(function (c) { return c.text; }).join('');
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch (err) {
-    return fail_('claude', { detail: 'json' });
-  }
-  return { ok: true, receipt: parsed, usage: body.usage || null };
+  return fail_('ai', { detail: lastError.slice(0, 300) });
 }
-
-const RECEIPT_SCHEMA_ = {
-  type: 'object',
-  properties: {
-    shop: { type: 'string' },
-    place: { type: 'string' },
-    date: { type: 'string' },
-    time: { type: 'string' },
-    total: { type: 'number' },
-    pay: { type: 'string' },
-    items: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          n: { type: 'string' },
-          q: { type: 'number' },
-          u: { type: 'string', enum: ['szt', 'kg'] },
-          p: { type: 'number' },
-          v: { type: 'number' },
-          d: { type: 'number' },
-          c: { type: 'string' },
-          g: { type: 'string' },
-          s: { type: 'number' },
-          su: { type: 'string', enum: ['kg', 'l', ''] },
-          note: { type: 'string' }
-        },
-        required: ['n', 'q', 'u', 'p', 'v', 'd', 'c', 'g', 's', 'su', 'note'],
-        additionalProperties: false
-      }
-    },
-    warnings: { type: 'array', items: { type: 'string' } }
-  },
-  required: ['shop', 'place', 'date', 'time', 'total', 'pay', 'items', 'warnings'],
-  additionalProperties: false
-};
 
 function parsePrompt_(categories, hints, nFiles) {
   const cats = Array.isArray(categories) ? categories.map(String).slice(0, 40) : [];
@@ -522,7 +506,9 @@ function parsePrompt_(categories, hints, nFiles) {
   return [
     'To jest polski paragon ze sklepu (zdjęcie, zrzut ekranu z aplikacji sklepu albo PDF).',
     nFiles > 1 ? 'Paragon jest podzielony na ' + nFiles + ' kolejnych fragmentów, które mogą na siebie lekko nachodzić — nie dubluj pozycji z zakładek. Uwaga: dwie identyczne linie jedna pod drugą to zwykle dwa osobne zakupy, a nie zakładka.' : '',
-    'Przepisz go do JSON:',
+    'Zwróć WYŁĄCZNIE obiekt JSON dokładnie w tym kształcie (liczby z kropką, bez jednostek):',
+    '{"shop": "", "place": "", "date": "RRRR-MM-DD", "time": "GG:MM", "total": 0, "pay": "", "warnings": [""], "items": [{"n": "", "q": 1, "u": "szt", "p": 0, "v": 0, "d": 0, "c": "", "g": "", "s": 0, "su": "", "note": ""}]}',
+    'Znaczenie pól:',
     '- shop: nazwa sieci (np. "Lidl", "Biedronka", "Auchan"), place: miasto i ulica sklepu, date: YYYY-MM-DD, time: HH:MM,',
     '- total: kwota faktycznie do zapłaty (ostatnie "Razem"/"Suma PLN" po kaucjach i zwrotach), pay: forma płatności krótko.',
     '- items: KAŻDA linia towaru po kolei, jak na paragonie:',
@@ -541,7 +527,7 @@ function parsePrompt_(categories, hints, nFiles) {
 }
 
 function getApiKey_() {
-  return PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY') || '';
+  return PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY') || '';
 }
 
 // ---------- użytkownicy, sesje, pomocnicze ----------
@@ -735,9 +721,9 @@ function jsonOut_(obj) {
 }
 
 // Uruchom RAZ ręcznie w edytorze Apps Script (Uruchom → autoryzuj), żeby właściciel przyznał
-// uprawnienia: Arkusz, wysyłanie maili, połączenia z Claude API. Potem wdróż jako aplikację.
+// uprawnienia: Arkusz, wysyłanie maili, połączenia z Gemini API. Potem wdróż jako aplikację.
 function autoryzuj() {
   getSheet_(USERS_SHEET, USERS_HEADERS);
   console.log('Właściciel: ' + ownerEmail_() + ', limit maili na dziś: ' + MailApp.getRemainingDailyQuota());
-  UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', { muteHttpExceptions: true });
+  UrlFetchApp.fetch(GEMINI_URL, { muteHttpExceptions: true });
 }

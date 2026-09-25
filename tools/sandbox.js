@@ -1,7 +1,7 @@
 // Serwer testowy: podaje appkę z GAS_URL -> /gas, a /gas obsługuje PRAWDZIWY Kod.gs uruchomiony
 // na atrapie Arkusza w pamięci. Maile nie wychodzą — trafiają do /__mail (z linkami do PIN-u),
-// a Claude API jest zastąpione atrapą (odpowiedź z pliku podanego jako 3. argument albo pusta).
-// Nic nie dotyka prawdziwego Arkusza ani Claude.
+// a Gemini API jest zastąpione atrapą (odpowiedź z pliku podanego jako 3. argument albo pusta).
+// Nic nie dotyka prawdziwego Arkusza ani Gemini.
 // Użycie: node tools/sandbox.js index.html Kod.gs [atrapa-odczytu.json] [port]
 const http = require('http'), fs = require('fs'), vm = require('vm'), crypto = require('crypto');
 const [htmlFile, kodFile, parseFile, portArg] = process.argv.slice(2);
@@ -23,7 +23,7 @@ function mkSheet(headers) {
 const sheets = {};
 const props = {};
 const mails = [];
-const claudeCalls = [];
+const aiCalls = [];
 const OWNER = 'wlasciciel@example.com';
 const sb = {
   console,
@@ -39,9 +39,10 @@ const sb = {
   UrlFetchApp: {
     fetch: (url, opt) => {
       const req = JSON.parse(opt.payload);
-      claudeCalls.push({ url, headers: opt.headers, model: req.model, fallbacks: req.fallbacks, blocks: req.messages[0].content.map(c => c.type), prompt: req.messages[0].content.slice(-1)[0].text });
+      const parts = req.contents[0].parts;
+      aiCalls.push({ url, headers: opt.headers, config: req.generationConfig, parts: parts.map(x => x.text != null ? 'text' : x.inline_data.mime_type), prompt: parts[0].text });
       const parsed = parseFile ? fs.readFileSync(parseFile, 'utf8') : '{"shop":"","place":"","date":"","time":"","total":0,"pay":"","items":[],"warnings":[]}';
-      return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ stop_reason: 'end_turn', content: [{ type: 'text', text: parsed }], usage: { input_tokens: 1, output_tokens: 1 } }) };
+      return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: parsed }] } }], usageMetadata: {} }) };
     }
   },
   Utilities: {
@@ -71,7 +72,7 @@ http.createServer((req, res) => {
     return;
   }
   if (req.url === '/__mail') return json(mails.map(m => ({ to: m.to, subject: m.subject, link: (m.body.match(/\?pin=([0-9a-f]+)/) || [])[1] })));
-  if (req.url === '/__claude') return json(claudeCalls);
+  if (req.url === '/__ai') return json(aiCalls);
   if (req.url === '/__sheets') return json(Object.fromEntries(Object.entries(sheets).map(([k, v]) => [k, v.rows])));
   if (req.url === '/__props') return json(Object.keys(props));
   let html = fs.readFileSync(htmlFile, 'utf8');

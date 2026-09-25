@@ -142,7 +142,7 @@
 
 <header class="top">
   <!-- Przy KAŻDYM wydaniu: podbij vertag i ustaw buildtag na bieżący czas. -->
-  <h1>Wydatki domowe<span class="vertag">v0.1</span><span class="buildtag"><span class="statusdot" id="statusDot" title="Połączenie z Arkuszem"></span>25.09.2026 18:20</span></h1>
+  <h1>Wydatki domowe<span class="vertag">v0.1</span><span class="buildtag"><span class="statusdot" id="statusDot" title="Połączenie z Arkuszem"></span>25.09.2026 18:30</span></h1>
   <button class="userbtn" id="userBtn" hidden></button>
 </header>
 <div class="menu" id="menu" hidden>
@@ -622,12 +622,12 @@ function renderPrices() {
   $('t-c').innerHTML = h;
 }
 
-// ---------- dodawanie paragonu: pliki → Claude ----------
+// ---------- dodawanie paragonu: pliki → Gemini (przez Kod.gs) ----------
 function readAsDataURL(file) { return new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = no; fr.readAsDataURL(file); }); }
 function loadImage(src) { return new Promise((ok, no) => { const im = new Image(); im.onload = () => ok(im); im.onerror = no; im.src = src; }); }
 
 // Długie zrzuty paragonów (np. 1170×22000 px) tniemy na zachodzące na siebie kawałki,
-// żeby tekst był czytelny — Claude i tak zmniejsza każde zdjęcie do ~1,5 Mpx.
+// żeby tekst był czytelny — modele AI i tak zmniejszają każde zdjęcie do ~1,5 Mpx.
 async function imageToTiles(file) {
   const im = await loadImage(await readAsDataURL(file));
   const W = Math.min(im.naturalWidth, 760);
@@ -651,7 +651,7 @@ async function imageToTiles(file) {
 async function onFiles(files) {
   const box = $('parseBox');
   box.hidden = false;
-  if (!hasKey) { box.innerHTML = msgHtml('err', 'Odczyt paragonów nie jest jeszcze włączony: admin musi wpisać klucz Claude w Panelu admina. Na razie możesz wpisać paragon ręcznie.'); return; }
+  if (!hasKey) { box.innerHTML = msgHtml('err', 'Odczyt paragonów nie jest jeszcze włączony: admin musi wpisać klucz Gemini w Panelu admina. Na razie możesz wpisać paragon ręcznie.'); return; }
   box.innerHTML = `<div class="card busy"><div class="spin"></div><div><b>Czytam paragon…</b><div class="muted small">Zwykle 20–60 sekund. Nie zamykaj appki.</div></div></div>`;
   try {
     let parts = [];
@@ -664,7 +664,7 @@ async function onFiles(files) {
     const hints = [...dict.entries()].slice(-300).map(([n, v]) => `${n} → ${v.cat} / ${v.prod || ''}`);
     const out = await api('parse', { files: parts, categories: CATS, hints });
     if (!out.ok) {
-      const why = { nokey: 'brak klucza Claude (Panel admina)', claude: 'Claude nie odczytał paragonu' + (out.detail ? ` (${esc(out.detail)})` : ''), bad: 'nieobsługiwany plik', auth: 'sesja wygasła' }[out.error] || esc(out.error);
+      const why = { nokey: 'brak klucza Gemini (Panel admina)', ai: 'Gemini nie odczytał paragonu' + (out.detail ? ` (${esc(out.detail)})` : ''), bad: 'nieobsługiwany plik', auth: 'sesja wygasła' }[out.error] || esc(out.error);
       box.innerHTML = msgHtml('err', 'Nie udało się: ' + why + '. Spróbuj jeszcze raz albo wpisz ręcznie.');
       return;
     }
@@ -685,7 +685,7 @@ function fromParsed(p, dict) {
     return calcItem(it);
   });
   return { id: newId(), shop: String(p.shop || ''), place: String(p.place || ''), date: /^\d{4}-\d{2}-\d{2}$/.test(p.date) ? p.date : new Date().toISOString().slice(0, 10),
-    time: String(p.time || ''), total: r2(p.total), pay: String(p.pay || ''), items, source: 'claude', warnings: (p.warnings || []).map(String) };
+    time: String(p.time || ''), total: r2(p.total), pay: String(p.pay || ''), items, source: 'ai', warnings: (p.warnings || []).map(String).filter(w => w.trim()) };
 }
 
 // ---------- edytor paragonu ----------
@@ -891,14 +891,14 @@ function renderAdmin(users, note) {
       <label class="f">E-mail (tu przyjdzie link do ustawienia PIN-u)<input id="nuEmail" type="email" autocapitalize="off"></label>
       <button class="cta" data-ad="create">Dodaj i wyślij zaproszenie</button>
     </div>
-    <div class="card stack"><p class="h">Odczyt paragonów (Claude)</p>
+    <div class="card stack"><p class="h">Odczyt paragonów (Gemini)</p>
       <div>${hasKey ? '<span class="chip ok">klucz ustawiony</span>' : '<span class="chip err">brak klucza — odczyt zdjęć wyłączony</span>'}</div>
-      <div class="muted small">Klucz API z console.anthropic.com (zaczyna się od sk-ant-). Trafia tylko do ustawień skryptu w Twoim Arkuszu — nie widać go w appce ani w repozytorium.</div>
-      <input id="adKey" type="password" autocomplete="off" placeholder="sk-ant-…">
+      <div class="muted small">Klucz Gemini API (zaczyna się od AIza…) — ten sam co w appce Paliwo: aistudio.google.com → Get API key, albo skopiuj z Paliwo (Apps Script → Ustawienia projektu → Właściwości skryptu → GEMINI_API_KEY). Trafia tylko do ustawień skryptu w Twoim Arkuszu — nie widać go w appce ani w repozytorium.</div>
+      <input id="adKey" type="password" autocomplete="off" placeholder="AIza…">
       <div class="grid2"><button class="btn2" data-ad="key">Zapisz klucz</button>${hasKey ? '<button class="btn2 danger" data-ad="keyDel">Usuń klucz</button>' : '<span></span>'}</div>
     </div>
     <div class="card stack"><p class="h">Import paragonów z pliku</p>
-      <div class="muted small">Plik .json z paragonami (np. przygotowany przez Claude na czacie). Paragony, które już są, zostaną pominięte.</div>
+      <div class="muted small">Plik .json z paragonami (np. przygotowany na czacie z Claude). Paragony, które już są, zostaną pominięte.</div>
       <label class="btn2" style="position:relative;overflow:hidden;text-align:center">Wybierz plik .json<input type="file" id="adImport" accept=".json,application/json" style="position:absolute;inset:0;opacity:0;font-size:200px"></label>
     </div>`;
   $('adBack').onclick = () => startMain();
@@ -915,7 +915,7 @@ async function adminClick(e, users) {
       const warn = out.sent === false ? msgHtml('err', 'Konto zapisane, ale mail się nie wysłał (limit Google albo zły adres). Spróbuj „Wyślij” później.') : msgHtml('ok', okText);
       if (out.users) renderAdmin(out.users, warn); else showAdmin(warn);
     } else {
-      const why = { exists: 'taki login już jest', bad: 'sprawdź dane', badkey: 'to nie wygląda na klucz Claude (sk-ant-…)' }[out && out.error] || 'brak połączenia';
+      const why = { exists: 'taki login już jest', bad: 'sprawdź dane', badkey: 'to nie wygląda na klucz Gemini (AIza…)' }[out && out.error] || 'brak połączenia';
       $('scrAdmin').insertAdjacentHTML('afterbegin', msgHtml('err', 'Nie udało się: ' + why + '.'));
       window.scrollTo(0, 0);
     }
