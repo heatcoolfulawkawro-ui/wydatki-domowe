@@ -38,7 +38,7 @@
   .vertag{ font-size:10px; font-weight:400; color:var(--ink-dim); background:var(--panel2); border:1px solid var(--line); border-radius:5px; padding:1px 5px; margin-left:6px; vertical-align:middle; }
   .buildtag{ display:block; font-size:10px; font-weight:400; color:var(--ink-dim); margin-top:1px; }
   .statusdot{ display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--ink-dim); margin-right:5px; vertical-align:middle; }
-  .statusdot.ok{ background:var(--green); } .statusdot.fail{ background:var(--red); }
+  .statusdot.ok{ background:var(--green); } .statusdot.fail{ background:var(--red); } .statusdot.local{ background:var(--amber); }
   .userbtn{ background:var(--panel2); border:1px solid var(--line); border-radius:20px; padding:6px 11px; font-size:13px; white-space:nowrap; }
   .menu{ position:absolute; right:12px; top:calc(env(safe-area-inset-top,0px) + 50px); background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:4px; display:flex; flex-direction:column; min-width:190px; box-shadow:0 8px 24px rgba(0,0,0,.4); z-index:20; }
   .menu button{ background:none; border:0; text-align:left; padding:11px 12px; border-radius:8px; }
@@ -142,7 +142,8 @@
 
 <header class="top">
   <!-- Przy KAŻDYM wydaniu: podbij vertag i ustaw buildtag na bieżący czas. -->
-  <h1>Wydatki domowe<span class="vertag">v0.3</span><span class="buildtag"><span class="statusdot" id="statusDot" title="Połączenie z Arkuszem"></span>26.09.2026 09:40</span></h1>
+  <h1>Wydatki domowe<span class="vertag">v0.3</span><span class="buildtag">26.09.2026 09:40</span></h1>
+  <span class="statusdot" id="statusDot" title="Połączenie z Arkuszem" style="cursor:pointer;"></span>
   <button id="btnHub" title="Rozdzielacz" hidden style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:14px;margin-right:8px;">🏠</button>
   <button class="userbtn" id="userBtn" hidden></button>
 </header>
@@ -254,8 +255,9 @@ async function checkConnection() {
   const dot = $('statusDot');
   if (!configured()) { dot.className = 'statusdot fail'; return false; }
   try { const res = await fetch(GAS_URL, { cache: 'no-store' }); dot.className = 'statusdot ' + (res.ok ? 'ok' : 'fail'); return res.ok; }
-  catch (e) { dot.className = 'statusdot fail'; return false; }
+  catch (e) { dot.className = 'statusdot local'; return false; }
 }
+$('statusDot').addEventListener('click', checkConnection);
 
 // ---------- dane: bufor lokalny + kolejka zmian ----------
 function allReceipts() {
@@ -290,7 +292,7 @@ async function sync() {
     }
     if (conflicts.length) toast('Ktoś zmienił ten paragon w międzyczasie — pokazuję nowszą wersję');
   } catch (e) {
-    $('statusDot').className = 'statusdot fail';
+    $('statusDot').className = 'statusdot local';
   } finally {
     syncing = false;
     renderSyncInfo();
