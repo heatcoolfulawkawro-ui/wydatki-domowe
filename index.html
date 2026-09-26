@@ -159,7 +159,7 @@
 
 <header class="top">
   <!-- Przy KAŻDYM wydaniu: podbij vertag i ustaw buildtag na bieżący czas. -->
-  <h1>Wydatki domowe<span class="vertag">v0.4</span><span class="buildtag">26.09.2026 16:56</span></h1>
+  <h1>Wydatki domowe<span class="vertag">v0.5</span><span class="buildtag">26.09.2026 17:00</span></h1>
   <span class="statusdot" id="statusDot" title="Połączenie z Arkuszem" style="cursor:pointer;"></span>
   <button id="btnHub" title="Rozdzielacz" hidden style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:14px;margin-right:8px;">🏠</button>
   <button class="userbtn" id="userBtn" hidden></button>
@@ -195,6 +195,19 @@
       <button class="btn2" id="btnManual">✎ Ręcznie</button>
     </div>
     <div class="muted small">Zdjęcie, zrzut ekranu z aplikacji sklepu albo PDF. Długi paragon: zaznacz kilka zrzutów naraz.</div>
+    <button class="btn2" id="btnQuick">⚡ Szybki wpis — sklep, za co, kwota</button>
+    <form id="quickBox" class="card stack" hidden autocomplete="off">
+      <div class="grid2">
+        <label class="f">Sklep<input id="qShop" list="dlQShop" placeholder="np. Chlebotek"></label>
+        <label class="f">Kwota (zł)<input id="qAmt" inputmode="decimal" placeholder="22"></label>
+      </div>
+      <label class="f">Za co<input id="qWhat" placeholder="np. chleb"></label>
+      <label class="f">Kategoria<select id="qCat"></select></label>
+      <div id="qMsg"></div>
+      <div class="grid2"><button class="btn2" type="button" id="qCancel">Anuluj</button><button class="cta" type="submit" style="padding:10px">Dodaj</button></div>
+      <div class="muted small">Zapisuje się z dzisiejszą datą. Szczegóły można potem poprawić w „✎ Edytuj”.</div>
+      <datalist id="dlQShop"></datalist>
+    </form>
     <div id="parseBox" hidden></div>
     <div id="rcList" class="stack"></div>
   </section>
@@ -1402,6 +1415,32 @@ document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => setTab(
 $('mPrev').onclick = () => { ui.ym = shiftYm(ui.ym, -1); lsSet(LS_UI, ui); openRc = null; nodeAct = null; renderMain(); };
 $('mNext').onclick = () => { ui.ym = shiftYm(ui.ym, 1); lsSet(LS_UI, ui); openRc = null; nodeAct = null; renderMain(); };
 $('fileIn').onchange = e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) onFiles(f); };
+// Szybki wpis: sklep + za co + kwota → paragon z jedną pozycją (reszta do poprawienia w pełnym edytorze).
+function openQuick() {
+  const box = $('quickBox'), dict = dictionary();
+  box.hidden = false;
+  $('dlQShop').innerHTML = [...new Set(allReceipts().map(r => r.shop).filter(Boolean))].map(s => `<option value="${esc(s)}">`).join('');
+  const last = ui.qCat && CATS.includes(ui.qCat) ? ui.qCat : 'Pieczywo';
+  $('qCat').innerHTML = CATS.filter(c => c !== DEPOSIT).map(c => `<option${c === last ? ' selected' : ''}>${esc(c)}</option>`).join('');
+  $('qWhat').oninput = () => { const k = dict.get($('qWhat').value.trim().toLowerCase()); if (k && k.cat !== DEPOSIT) $('qCat').value = k.cat; };
+  $('qMsg').innerHTML = '';
+  $('qShop').focus();
+}
+$('btnQuick').onclick = () => $('quickBox').hidden ? openQuick() : ($('quickBox').hidden = true);
+$('qCancel').onclick = () => { $('quickBox').hidden = true; };
+$('quickBox').onsubmit = e => {
+  e.preventDefault();
+  const shop = $('qShop').value.trim(), what = $('qWhat').value.trim(), amt = r2(num($('qAmt').value)), cat = $('qCat').value;
+  if (!shop || !what || !(amt > 0)) { $('qMsg').innerHTML = msgHtml('err', 'Wpisz sklep, za co i kwotę.'); return; }
+  const d = new Date(), date = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const item = calcItem({ name: what, prod: '', cat, qty: 1, unit: 'szt', price: amt, gross: amt, disc: 0, size: 0, sizeU: '' });
+  const r = { id: newId(), shop, place: '', date, time: String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'), total: amt, pay: '', items: [item], source: 'manual' };
+  ui.qCat = cat; ui.ym = ymOf(date); lsSet(LS_UI, ui);
+  ['qShop', 'qWhat', 'qAmt'].forEach(id => $(id).value = '');
+  $('quickBox').hidden = true;
+  queue({ op: 'save', receipt: r, base: null });
+  toast(`Dodano: ${shop}, ${what}, ${zl(amt)} zł`, 2500);
+};
 $('btnManual').onclick = () => openEditor({ id: newId(), shop: '', place: '', date: new Date().toISOString().slice(0, 10), time: '', total: 0, pay: '', items: [], source: 'manual' }, true);
 $('rcList').onclick = e => {
   const t = e.target.closest('[data-rc],[data-edit],[data-del],[data-delyes],[data-delno]');
