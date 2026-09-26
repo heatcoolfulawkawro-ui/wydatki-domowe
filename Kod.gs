@@ -28,6 +28,73 @@ const RECEIPTS_HEADERS = ['id', 'date', 'shop', 'total', 'json', 'addedBy', 'cre
 const AUDIT_SHEET = 'Audit';
 const AUDIT_HEADERS = ['time', 'actor', 'action', 'target', 'detail'];
 
+// ---------- Sync PIN-u konta PF z siostrzanymi appkami ----------
+// Tylko konto PF_ID jest zsynchronizowane z Paliwem/Wagą/Kartą godzin — inni
+// domownicy mają całkowicie osobne, niezależne PIN-y (własny link mailem).
+// Żeby dołożyć kolejną appkę do rodziny: dopisz jej URL tutaj i do SIBLING_URLS
+// wszystkich pozostałych, potem zbootstrapuj w niej TEN SAM sekret.
+const PF_ID = 'PF';
+const SIBLING_URLS = [
+  'https://script.google.com/macros/s/AKfycbwp2qGgpobvHRCOurqA614AxnIA5ozdLlv_EsIr1Ve8t3vNp3Qur8ZfashMQpSZFuM/exec', // Paliwo PF
+  'https://script.google.com/macros/s/AKfycbz3-nc9P2jTv3pX2_aiP6Ne7A67QXtZHObP53BU3GNMIjgrThQSJtfaOCnBbGSGSRQI/exec', // Waga PF
+  'https://script.google.com/macros/s/AKfycby09rSaJwoPPl6KeFn80xCOTiOzYM4EZyKy5XuJ0pBA28-x051wB9HXg_osSqUrjoHA/exec' // Karta godzin
+];
+
+function bootstrapSyncSecret_(b) {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('SYNC_SECRET')) return fail_('exists');
+  const secret = String(b.secret || '');
+  if (secret.length < 20) return fail_('bad');
+  props.setProperty('SYNC_SECRET', secret);
+  return { ok: true };
+}
+
+// Odbiór PIN-u z siostrzanej appki — dotyczy WYŁĄCZNIE konta PF, nie rozsyła dalej.
+function syncPinPush_(b) {
+  const real = PropertiesService.getScriptProperties().getProperty('SYNC_SECRET');
+  if (!real || String(b.secret || '') !== real) return fail_('auth');
+  const pin = validPin_(b.newPin);
+  if (!pin) return { ok: true }; // inny format PIN-u (np. dłuższy z Paliwa/Wagi) - pomijamy, to nie błąd
+  const u = findUser_(PF_ID);
+  if (!u) return fail_('bad');
+  setPin_(u, pin);
+  return { ok: true };
+}
+
+function syncSelftest_() {
+  const secret = PropertiesService.getScriptProperties().getProperty('SYNC_SECRET');
+  if (!secret) return fail_('nosecret');
+  const results = SIBLING_URLS.map(function (url) {
+    try {
+      const res = UrlFetchApp.fetch(url, {
+        method: 'post', contentType: 'text/plain',
+        payload: JSON.stringify({ action: 'sync_ping', secret: secret }),
+        muteHttpExceptions: true
+      });
+      return { url: url, status: res.getResponseCode(), body: res.getContentText().slice(0, 300) };
+    } catch (e) {
+      return { url: url, error: e.message };
+    }
+  });
+  return { ok: true, results: results };
+}
+
+// Wywoływane, gdy PIN konta PF faktycznie się zmienił — rozsyła do sióstr.
+// Najlepszego wysiłku: appka, która akurat nie odpowie, dogoni przy najbliższym auth-fail.
+function pushPinToSiblings_(pin) {
+  const secret = PropertiesService.getScriptProperties().getProperty('SYNC_SECRET');
+  if (!secret) return;
+  SIBLING_URLS.forEach(function (url) {
+    try {
+      UrlFetchApp.fetch(url, {
+        method: 'post', contentType: 'text/plain',
+        payload: JSON.stringify({ action: 'sync_pin_push', secret: secret, newPin: pin }),
+        muteHttpExceptions: true
+      });
+    } catch (e) { /* best-effort — patrz komentarz wyżej */ }
+  });
+}
+
 const SESSION_TTL_MS = 60 * 24 * 3600 * 1000;
 const LINK_TTL_MS = 48 * 3600 * 1000;
 const LINK_MIN_GAP_MS = 60 * 1000; // najwyżej jeden mail z linkiem na minutę na konto
@@ -95,6 +162,13 @@ function dispatch_(b) {
     case 'requestLink': return requestLink_(b);
     case 'checkLink': return checkLink_(b);
     case 'setPinByLink': return setPinByLink_(b);
+    case 'bootstrap_sync_secret': return bootstrapSyncSecret_(b);
+    case 'sync_pin_push': return syncPinPush_(b);
+    case 'sync_selftest': return syncSelftest_();
+    case 'sync_ping': {
+      const real = PropertiesService.getScriptProperties().getProperty('SYNC_SECRET');
+      return { ok: !!real && String(b.secret || '') === real };
+    }
   }
   const auth = authenticate_(b.token);
   if (!auth) return fail_('auth');
@@ -210,6 +284,7 @@ function setPinByLink_(b) {
   if (!u || !u.active) return fail_('link');
   getSheet_(LINKS_SHEET, LINKS_HEADERS).getRange(link.row, 5).setValue(true);
   setPin_(u, pin);
+  if (u.id === PF_ID) pushPinToSiblings_(pin);
   audit_(u.id, 'setPinByLink', { id: u.id, purpose: link.purpose });
   return newSession_(findUser_(u.id));
 }
@@ -221,6 +296,7 @@ function changePin_(user, b) {
   const u = findUser_(user.id);
   if (!safeEqual_(hashPin_(oldPin, u.salt), u.hash)) return fail_('bad');
   setPin_(u, newPin);
+  if (u.id === PF_ID) pushPinToSiblings_(newPin);
   return newSession_(findUser_(u.id));
 }
 
