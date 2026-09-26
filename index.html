@@ -146,6 +146,7 @@
   <button class="userbtn" id="userBtn" hidden></button>
 </header>
 <div class="menu" id="menu" hidden>
+  <button data-m="hub" id="menuHub" hidden>← Rozdzielacz</button>
   <button data-m="pin">Zmień PIN</button>
   <button data-m="admin" id="menuAdmin" hidden>Panel admina</button>
   <button data-m="refresh">Odśwież dane</button>
@@ -344,6 +345,7 @@ function renderUserBtn() {
   b.hidden = !auth;
   if (auth) b.textContent = auth.user.name + ' ▾';
   $('menuAdmin').hidden = !(auth && auth.user.role === 'admin');
+  $('menuHub').hidden = !(auth && auth.user.role === 'admin');
 }
 
 // ---------- logowanie ----------
@@ -1038,7 +1040,8 @@ document.addEventListener('click', e => { if (!e.target.closest('#menu')) $('men
 $('menu').onclick = async e => {
   const m = e.target.closest('[data-m]'); if (!m) return;
   $('menu').hidden = true;
-  if (m.dataset.m === 'pin') showChangePin();
+  if (m.dataset.m === 'hub') location.href = 'https://heatcoolfulawkawro-ui.github.io/';
+  else if (m.dataset.m === 'pin') showChangePin();
   else if (m.dataset.m === 'admin') showAdmin();
   else if (m.dataset.m === 'refresh') { toast('Odświeżam…'); await sync(); toast('Dane aktualne'); }
   else if (m.dataset.m === 'logout') {
