@@ -273,7 +273,15 @@ function adminSetApiKey_(b) {
     props.deleteProperty('GEMINI_API_KEY');
     return { ok: true, hasKey: false };
   }
-  if (!/^AIza[0-9A-Za-z_\-]{30,60}$/.test(key)) return fail_('badkey');
+  // Formatu nie zgadujemy (Google zmienia wygląd kluczy) — pytamy Gemini, czy klucz działa.
+  if (!/^[\x21-\x7e]{20,200}$/.test(key)) return fail_('badkey');
+  let code;
+  try {
+    code = UrlFetchApp.fetch(GEMINI_URL, { headers: { 'x-goog-api-key': key }, muteHttpExceptions: true }).getResponseCode();
+  } catch (err) {
+    return fail_('keycheck');
+  }
+  if (code !== 200) return fail_('keyrejected', { status: code });
   props.setProperty('GEMINI_API_KEY', key);
   props.deleteProperty('GEMINI_MODEL_OK');
   return { ok: true, hasKey: true };

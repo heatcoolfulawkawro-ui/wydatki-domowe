@@ -142,7 +142,7 @@
 
 <header class="top">
   <!-- Przy KAŻDYM wydaniu: podbij vertag i ustaw buildtag na bieżący czas. -->
-  <h1>Wydatki domowe<span class="vertag">v0.1</span><span class="buildtag"><span class="statusdot" id="statusDot" title="Połączenie z Arkuszem"></span>25.09.2026 19:36</span></h1>
+  <h1>Wydatki domowe<span class="vertag">v0.2</span><span class="buildtag"><span class="statusdot" id="statusDot" title="Połączenie z Arkuszem"></span>26.09.2026 05:48</span></h1>
   <button class="userbtn" id="userBtn" hidden></button>
 </header>
 <div class="menu" id="menu" hidden>
@@ -915,7 +915,7 @@ async function adminClick(e, users) {
       const warn = out.sent === false ? msgHtml('err', 'Konto zapisane, ale mail się nie wysłał (limit Google albo zły adres). Spróbuj „Wyślij” później.') : msgHtml('ok', okText);
       if (out.users) renderAdmin(out.users, warn); else showAdmin(warn);
     } else {
-      const why = { exists: 'taki login już jest', bad: 'sprawdź dane', badkey: 'to nie wygląda na klucz Gemini (AIza…)' }[out && out.error] || 'brak połączenia';
+      const why = { exists: 'taki login już jest', bad: 'sprawdź dane', badkey: 'to nie wygląda na klucz (bez spacji, 20–200 znaków)', keyrejected: 'Gemini odrzucił ten klucz (kod ' + (out && out.status) + ') — sprawdź, czy skopiował się cały i tylko klucz', keycheck: 'nie udało się połączyć z Gemini, spróbuj za chwilę' }[out && out.error] || 'brak połączenia';
       $('scrAdmin').insertAdjacentHTML('afterbegin', msgHtml('err', 'Nie udało się: ' + why + '.'));
       window.scrollTo(0, 0);
     }
