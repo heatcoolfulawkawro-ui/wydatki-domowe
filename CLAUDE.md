@@ -107,12 +107,19 @@ Do zrobienia na PC Szefa (tam są zalogowane `clasp` i `gh`), w tej kolejności:
   paragon w międzyczasie) → wygrywa nowsza wersja z serwera.
 - Panel admina: konta (dodaj z e-mailem, wyślij link, odblokuj, zmień e-mail, wyłącz), klucz Gemini,
   import paragonów z pliku .json.
+- Archiwum oryginałów (v0.3, 26.09.2026): po „Zapisz paragon” oryginalne pliki (zdjęcia/PDF z odczytu
+  albo dołączone przyciskiem „Dołącz oryginał” w edytorze) idą akcją `archive` (jeden plik na żądanie)
+  na Dysk Google właściciela: `Wydatki domowe — paragony/RRRR-MM/<data> <sklep> <kwota> zł (n).jpg`.
+  ID folderu we właściwości `ARCHIVE_FOLDER_ID`. Lista `files:[{id,name}]` w JSON paragonu — zmienia ją
+  TYLKO `archiveFile_`; `saveReceipt_` zawsze przepisuje ją z Arkusza (klient jej nie nadpisze).
+- Uprawnienia są wpisane jawnie w `appsscript.json` (`oauthScopes`: spreadsheets.currentonly,
+  script.send_mail, script.external_request, userinfo.email, drive.file). Nowa usługa Google w Kod.gs =
+  dopisać zakres + po wdrożeniu Szef raz uruchamia `autoryzuj` → Zezwól (do tego czasu Web App nie działa).
 
 ## Otwarte tematy
 
-- Nic z tego nie było jeszcze testowane na prawdziwym Apps Script ani z prawdziwym Gemini API
-  (tylko sandbox + atrapy). Po wdrożeniu: sprawdzić czas odczytu długiego paragonu (UrlFetchApp ma
-  limit czasu — jeśli będzie za wolno, rozważyć inny model po zgodzie Szefa).
+- Działa na prawdziwym Apps Script + Gemini od 26.09.2026 (9 paragonów wrzesień). Przy przeciążeniu
+  Gemini (503 „high demand”) jest ponowienie i modele zapasowe. Bon za zwrot opakowań: total = PO bonie.
 - Szef ma potwierdzić: 2 paczki parówek na paragonie Biedronki 18.09, co to „Lunchbox 250g” (Lidl 08.09),
   pomidory kiść 500 g za 14,99 zł.
 - Pomysły na później: budżet miesięczny, wykresy trendu cen produktu, eksport do Excela.

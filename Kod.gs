@@ -40,6 +40,9 @@ const MAX_RECEIPT_CHARS = 100000;
 // Model, który ostatnio zadziałał, jest zapamiętywany we właściwości GEMINI_MODEL_OK.
 const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-3.6-flash', 'gemini-flash-lite-latest'];
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/';
+const ARCHIVE_FOLDER_NAME = 'Wydatki domowe — paragony';
+const ARCHIVE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'image/heif': 'heif', 'image/webp': 'webp', 'application/pdf': 'pdf' };
+const MAX_ARCHIVE_B64 = 30 * 1024 * 1024; // jeden plik na żądanie
 const MAX_PARSE_FILES = 8;
 const MAX_PARSE_B64 = 20 * 1024 * 1024;
 
@@ -103,6 +106,7 @@ function dispatch_(b) {
     case 'list': return listReceipts_();
     case 'save': return saveReceipt_(user, b);
     case 'delete': return deleteReceipt_(user, b);
+    case 'archive': return archiveFile_(user, b);
   }
   if (action.indexOf('admin.') !== 0) return fail_('bad');
   if (user.role !== 'admin') return fail_('forbidden');
@@ -394,10 +398,14 @@ function saveReceipt_(user, b) {
     if (b.baseUpdatedAt != null && Number(old[8]) > Number(b.baseUpdatedAt)) return fail_('conflict', { current: JSON.parse(old[4]) });
     r.addedBy = String(old[5]);
     r.createdAt = Number(old[6]);
+    // Listą oryginałów zarządza tylko archiveFile_ — zwykły zapis jej nie zmienia.
+    const oldFiles = (JSON.parse(old[4]) || {}).files;
+    if (oldFiles && oldFiles.length) r.files = oldFiles; else delete r.files;
     r.updatedBy = user.id;
     r.updatedAt = now;
     sheet.getRange(found.row, 1, 1, RECEIPTS_HEADERS.length).setValues([[r.id, r.date, String(r.shop || ''), r.total, JSON.stringify(r), r.addedBy, r.createdAt, user.id, now, false]]);
   } else {
+    delete r.files;
     r.addedBy = user.id;
     r.createdAt = now;
     r.updatedBy = user.id;
@@ -415,6 +423,56 @@ function deleteReceipt_(user, b) {
   sheet.getRange(found.row, 8, 1, 3).setValues([[user.id, Date.now(), true]]);
   audit_(user.id, 'delete', { id: b.id, shop: found.values[2], date: found.values[1], total: found.values[3] });
   return { ok: true };
+}
+
+// ---------- archiwum oryginałów na Dysku Google ----------
+// Oryginalne zdjęcia/PDF paragonów: „Wydatki domowe — paragony/RRRR-MM/<data> <sklep> <kwota> zł.jpg”.
+// Zakres drive.file — skrypt widzi tylko pliki i foldery, które sam utworzył.
+
+function archiveRoot_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('ARCHIVE_FOLDER_ID');
+  if (id) {
+    try {
+      const f = DriveApp.getFolderById(id);
+      if (!f.isTrashed()) return f;
+    } catch (err) {
+      console.error('Folder archiwum niedostępny: ' + err.message);
+    }
+  }
+  const root = DriveApp.createFolder(ARCHIVE_FOLDER_NAME);
+  props.setProperty('ARCHIVE_FOLDER_ID', root.getId());
+  return root;
+}
+
+function archiveMonthFolder_(root, ym) {
+  const it = root.getFoldersByName(ym);
+  while (it.hasNext()) {
+    const f = it.next();
+    if (!f.isTrashed()) return f;
+  }
+  return root.createFolder(ym);
+}
+
+function archiveFile_(user, b) {
+  const found = findReceiptRow_(String(b.id || ''));
+  if (!found) return fail_('notfound');
+  if (found.values[9] === true || found.values[9] === 'TRUE') return fail_('deleted');
+  const f = b.file || {};
+  const data = String(f.data || '');
+  const type = String(f.type || '');
+  const ext = ARCHIVE_TYPES[type];
+  if (!ext || !data || data.length > MAX_ARCHIVE_B64 || /[^A-Za-z0-9+/=]/.test(data)) return fail_('bad');
+  const r = JSON.parse(found.values[4]);
+  const files = Array.isArray(r.files) ? r.files : [];
+  const base = r.date + ' ' + String(r.shop || 'paragon').replace(/[\\/:*?"<>|]/g, '').trim() + ' ' + String(r.total.toFixed(2)).replace('.', ',') + ' zł';
+  const name = base + (files.length || b.more ? ' (' + (files.length + 1) + ')' : '') + '.' + ext;
+  const blob = Utilities.newBlob(Utilities.base64Decode(data), type, name);
+  const file = archiveMonthFolder_(archiveRoot_(), r.date.slice(0, 7)).createFile(blob);
+  files.push({ id: file.getId(), name: name });
+  r.files = files;
+  getSheet_(RECEIPTS_SHEET, RECEIPTS_HEADERS).getRange(found.row, 5).setValue(JSON.stringify(r));
+  return { ok: true, files: files };
 }
 
 function adminImport_(admin, b) {
@@ -747,6 +805,7 @@ function jsonOut_(obj) {
 // uprawnienia: Arkusz, wysyłanie maili, połączenia z Gemini API. Potem wdróż jako aplikację.
 function autoryzuj() {
   getSheet_(USERS_SHEET, USERS_HEADERS);
+  console.log('Archiwum oryginałów: ' + archiveRoot_().getUrl());
   console.log('Właściciel: ' + ownerEmail_() + ', limit maili na dziś: ' + MailApp.getRemainingDailyQuota());
   UrlFetchApp.fetch(GEMINI_URL, { muteHttpExceptions: true });
 }

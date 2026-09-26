@@ -142,7 +142,7 @@
 
 <header class="top">
   <!-- Przy KAŻDYM wydaniu: podbij vertag i ustaw buildtag na bieżący czas. -->
-  <h1>Wydatki domowe<span class="vertag">v0.2</span><span class="buildtag"><span class="statusdot" id="statusDot" title="Połączenie z Arkuszem"></span>26.09.2026 05:48</span></h1>
+  <h1>Wydatki domowe<span class="vertag">v0.3</span><span class="buildtag"><span class="statusdot" id="statusDot" title="Połączenie z Arkuszem"></span>26.09.2026 09:40</span></h1>
   <button class="userbtn" id="userBtn" hidden></button>
 </header>
 <div class="menu" id="menu" hidden>
@@ -219,7 +219,8 @@ const newId = () => 'r' + Date.now().toString(36) + Math.random().toString(36).s
 function lsGet(k, def) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch (e) { return def; } }
 function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
-function toast(t) { const el = $('savetag'); el.textContent = t; el.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), 1800); }
+function toast(t, ms) { const el = $('savetag'); el.textContent = t; el.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('show'), ms || 1800); }
+const sleep = ms => new Promise(ok => setTimeout(ok, ms));
 function msgHtml(kind, text) { return `<div class="msg ${kind}">${text}</div>`; }
 const configured = () => GAS_URL.indexOf('__DEPLOYMENT_ID__') < 0;
 
@@ -534,6 +535,7 @@ function renderReceipts() {
       ${open ? `<div class="items">${r.items.map(itemLine).join('')}
         <div class="row"><b>Suma pozycji</b><b class="num">${zl(itemsSum(r))}</b></div>
         <div class="muted small">${r.place ? esc(r.place) + ' · ' : ''}${r.pay ? esc(r.pay) + ' · ' : ''}dodał(a): ${esc(r.addedBy || '—')}${r.updatedBy && r.updatedBy !== r.addedBy ? ', zmienił(a): ' + esc(r.updatedBy) : ''}</div>
+        ${(r.files || []).length ? `<div class="small">📎 Oryginał na Dysku: ${r.files.map((f, n) => `<a href="https://drive.google.com/file/d/${encodeURIComponent(f.id)}/view" target="_blank" rel="noopener">${r.files.length > 1 ? 'plik ' + (n + 1) : 'otwórz'}</a>`).join(' · ')}</div>` : ''}
         <div class="rcact">${pendingDelete === r.id
           ? `<span class="muted small" style="align-self:center">Usunąć ten paragon?</span><button class="btn2 sm" data-delno="1">Nie</button><button class="btn2 sm danger" data-delyes="${esc(r.id)}">Tak, usuń</button>`
           : `<button class="btn2 sm danger" data-del="${esc(r.id)}">Usuń</button><button class="btn2 sm" data-edit="${esc(r.id)}">✎ Edytuj</button>`}</div>
@@ -669,7 +671,7 @@ async function onFiles(files) {
       return;
     }
     box.hidden = true; box.innerHTML = '';
-    openEditor(fromParsed(out.receipt, dict), true);
+    openEditor(fromParsed(out.receipt, dict), true, files);
   } catch (e) {
     box.innerHTML = msgHtml('err', 'Brak połączenia z Arkuszem albo odczyt trwał za długo. Spróbuj jeszcze raz (najlepiej na Wi-Fi).');
   }
@@ -689,11 +691,11 @@ function fromParsed(p, dict) {
 }
 
 // ---------- edytor paragonu ----------
-let ed = null; // {r, isNew, base, open:Set, confirm:null|'sum'|'dup'}
+let ed = null; // {r, isNew, base, open:Set, confirm:null|'sum'|'dup', orig:[File] — oryginały do wysłania na Dysk po zapisie}
 
-function openEditor(r, isNew) {
+function openEditor(r, isNew, orig) {
   const copy = JSON.parse(JSON.stringify(r));
-  ed = { r: copy, isNew, base: isNew ? null : (r.updatedAt || null), open: new Set(), confirm: null };
+  ed = { r: copy, isNew, base: isNew ? null : (r.updatedAt || null), open: new Set(), confirm: null, orig: orig ? [...orig] : [] };
   if (isNew && !copy.items.length) { copy.items.push(blankItem()); ed.open.add(0); }
   copy.items.forEach((it, k) => { if (it.note) ed.open.add(k); });
   showScreen('scrEdit');
@@ -762,8 +764,42 @@ function renderEditor() {
     <button class="btn2" id="edAdd">＋ Pozycja</button>
     <datalist id="dlShop">${shops.map(s => `<option value="${esc(s)}">`).join('')}</datalist>
     <datalist id="dlProd">${prods.map(s => `<option value="${esc(s)}">`).join('')}</datalist>
+    <div class="card stack" id="edOrigBox">${origHtml()}</div>
     <div class="sumbar"><div id="edSum"></div><button class="cta" id="edSave">Zapisz paragon</button></div>`;
   updateEdSum();
+}
+
+function origHtml() {
+  const saved = ed.r.files || [];
+  return `<p class="h">📎 Oryginał na Dysku</p>
+    ${saved.map(f => `<a class="small" href="https://drive.google.com/file/d/${encodeURIComponent(f.id)}/view" target="_blank" rel="noopener">🖼 ${esc(f.name)}</a>`).join('')}
+    ${saved.length && !ed.orig.length ? '<div class="g small">✓ Zapisane — możesz usunąć z telefonu</div>' : ''}
+    ${ed.orig.map(f => `<div class="small muted">⏳ ${esc(f.name || 'plik')} — wyślę na Dysk po „Zapisz paragon”</div>`).join('')}
+    ${!saved.length && !ed.orig.length ? '<div class="muted small">Brak — dołącz zdjęcie albo PDF paragonu, żeby mieć go w archiwum.</div>' : ''}
+    <label class="btn2" style="position:relative;overflow:hidden;text-align:center">Dołącz oryginał<input type="file" id="edOrig" accept="image/*,application/pdf" multiple style="position:absolute;inset:0;opacity:0;font-size:200px"></label>`;
+}
+
+// Wysyła oryginały na Dysk, gdy paragon jest już w Arkuszu (czeka na kolejkę zmian).
+async function uploadOriginals(id, files) {
+  const pending = () => outbox.some(o => o.op === 'save' && o.receipt.id === id);
+  for (let i = 0; i < 90 && pending(); i++) { if (!syncing) sync(); await sleep(1000); }
+  if (pending()) { toast('Oryginał nie zapisany (brak połączenia) — dołącz go później w edytorze', 5000); return; }
+  toast('Zapisuję oryginał na Dysku…', 60000);
+  try {
+    let list = null;
+    for (const f of files) {
+      const type = f.type || (/\.pdf$/i.test(f.name) ? 'application/pdf' : 'image/jpeg');
+      const out = await api('archive', { id, file: { type, data: (await readAsDataURL(f)).split(',')[1] }, more: files.length > 1 });
+      if (!out || !out.ok) throw new Error(out && out.error || 'server');
+      list = out.files;
+    }
+    const rc = cache.receipts.find(x => x.id === id);
+    if (rc && list) { rc.files = list; saveLocal(); }
+    toast(`Oryginał na Dysku ✓ (${files.length}) — możesz usunąć z telefonu`, 5000);
+    if (!$('scrMain').hidden) renderMain();
+  } catch (e) {
+    toast('Nie udało się zapisać oryginału na Dysku — spróbuj „Dołącz oryginał” w edytorze', 6000);
+  }
 }
 
 function updateEdSum() {
@@ -794,6 +830,7 @@ function edRefreshItem(k) {
 
 function edInput(e) {
   const t = e.target;
+  if (t.id === 'edOrig') return;
   const r = ed.r;
   const hdr = { edShop: 'shop', edDate: 'date', edTime: 'time', edPlace: 'place', edPay: 'pay' };
   if (hdr[t.id]) { r[hdr[t.id]] = t.value; ed.confirm = null; updateEdSum(); return; }
@@ -844,12 +881,13 @@ function edSave() {
   if (dup && ed.confirm !== 'dup') { ed.confirm = 'dup'; updateEdSum(); return; }
   r.items.forEach(calcItem);
   delete r.warnings;
-  const base = ed.base;
+  const base = ed.base, orig = ed.orig;
   ui.ym = ymOf(r.date); lsSet(LS_UI, ui);
   openRc = r.id;
   ed = null;
   queue({ op: 'save', receipt: r, base });
   toast('Zapisano');
+  if (orig.length) uploadOriginals(r.id, orig);
   ui.tab = 'p';
   startMain();
   setTab('p');
@@ -989,7 +1027,11 @@ $('rcList').onclick = e => {
 };
 $('t-c').onclick = e => { const t = e.target.closest('[data-prod]'); if (!t) return; openProd = openProd === t.dataset.prod ? null : t.dataset.prod; renderPrices(); };
 $('scrEdit').addEventListener('input', e => { if (ed) edInput(e); });
-$('scrEdit').addEventListener('change', e => { if (ed && e.target.tagName === 'SELECT') edInput(e); });
+$('scrEdit').addEventListener('change', e => {
+  if (!ed) return;
+  if (e.target.id === 'edOrig') { ed.orig.push(...e.target.files); e.target.value = ''; $('edOrigBox').innerHTML = origHtml(); return; }
+  if (e.target.tagName === 'SELECT') edInput(e);
+});
 $('scrEdit').addEventListener('click', e => { if (ed) edClick(e); });
 $('userBtn').onclick = e => { e.stopPropagation(); $('menu').hidden = !$('menu').hidden; };
 document.addEventListener('click', e => { if (!e.target.closest('#menu')) $('menu').hidden = true; });
