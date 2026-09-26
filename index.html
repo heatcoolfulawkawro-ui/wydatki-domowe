@@ -368,7 +368,7 @@ async function showAuth(note) {
     ${note ? msgHtml('warn', esc(note)) : ''}
     ${!st ? msgHtml('err', 'Brak połączenia z Arkuszem. Sprawdź internet.') : ''}
     <label class="f">Login (skrót, np. PF)<input id="lgUser" autocapitalize="characters" autocomplete="username" maxlength="6" value="${esc(lsGet(LS_UI, {}).lastUser || '')}"></label>
-    <label class="f">PIN (6 cyfr)<input id="lgPin" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="current-password"></label>
+    <label class="f">PIN<input id="lgPin" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="10" autocomplete="current-password"></label>
     <div id="lgMsg"></div>
     <button class="cta" type="submit">Zaloguj</button>
     <button class="linkbtn" type="button" id="lgForgot">Nie pamiętam PIN-u / pierwsze logowanie</button>
@@ -377,7 +377,7 @@ async function showAuth(note) {
     e.preventDefault();
     const user = $('lgUser').value.trim().toUpperCase(), pin = $('lgPin').value.trim();
     const box = $('lgMsg');
-    if (!/^[A-Z]{1,6}$/.test(user) || !/^\d{6}$/.test(pin)) { box.innerHTML = msgHtml('err', 'Login to 1–6 liter, PIN to 6 cyfr.'); return; }
+    if (!/^[A-Z]{1,6}$/.test(user) || !/^\d{4,10}$/.test(pin)) { box.innerHTML = msgHtml('err', 'Login to 1–6 liter, PIN to 4-10 cyfr.'); return; }
     box.innerHTML = '';
     try {
       const out = await api('login', { user, pin });
@@ -434,16 +434,16 @@ async function showSetPin(link) {
   }
   el.innerHTML = `<form class="auth card stack" id="spForm">
     <h2>${chk.purpose === 'invite' ? 'Witaj' : 'Nowy PIN'}, ${esc(chk.user.name)}</h2>
-    <div class="muted">Twój login: <b>${esc(chk.user.id)}</b>. Ustaw 6-cyfrowy PIN — będziesz go wpisywać przy logowaniu.</div>
-    <label class="f">Nowy PIN<input id="spPin1" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password"></label>
-    <label class="f">Powtórz PIN<input id="spPin2" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password"></label>
+    <div class="muted">Twój login: <b>${esc(chk.user.id)}</b>. Ustaw PIN (4-10 cyfr) — będziesz go wpisywać przy logowaniu.</div>
+    <label class="f">Nowy PIN<input id="spPin1" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="10" autocomplete="new-password"></label>
+    <label class="f">Powtórz PIN<input id="spPin2" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="10" autocomplete="new-password"></label>
     <div id="spMsg"></div>
     <button class="cta" type="submit">Ustaw PIN i wejdź</button>
   </form>`;
   $('spForm').onsubmit = async e => {
     e.preventDefault();
     const p1 = $('spPin1').value.trim(), p2 = $('spPin2').value.trim(), box = $('spMsg');
-    if (!/^\d{6}$/.test(p1)) { box.innerHTML = msgHtml('err', 'PIN to dokładnie 6 cyfr.'); return; }
+    if (!/^\d{4,10}$/.test(p1)) { box.innerHTML = msgHtml('err', 'PIN to 4-10 cyfr.'); return; }
     if (p1 !== p2) { box.innerHTML = msgHtml('err', 'PIN-y się różnią.'); return; }
     try {
       const out = await api('setPinByLink', { link, pin: p1 });
@@ -462,9 +462,9 @@ function showChangePin() {
   const el = $('scrPin');
   el.innerHTML = `<div class="pagehead"><button class="btn2" id="cpBack">‹ Wróć</button><h2>Zmień PIN</h2></div>
   <form class="card stack" id="cpForm">
-    <label class="f">Obecny PIN<input id="cpOld" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="current-password"></label>
-    <label class="f">Nowy PIN<input id="cpNew1" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password"></label>
-    <label class="f">Powtórz nowy PIN<input id="cpNew2" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="new-password"></label>
+    <label class="f">Obecny PIN<input id="cpOld" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="10" autocomplete="current-password"></label>
+    <label class="f">Nowy PIN (4-10 cyfr)<input id="cpNew1" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="10" autocomplete="new-password"></label>
+    <label class="f">Powtórz nowy PIN<input id="cpNew2" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="10" autocomplete="new-password"></label>
     <div id="cpMsg"></div>
     <button class="cta" type="submit">Zmień PIN</button>
     <div class="muted small">Nie pamiętasz obecnego? Wyloguj się i na ekranie logowania wybierz „Nie pamiętam PIN-u” — link przyjdzie na e-mail.</div>
@@ -473,7 +473,7 @@ function showChangePin() {
   $('cpForm').onsubmit = async e => {
     e.preventDefault();
     const o = $('cpOld').value.trim(), n1 = $('cpNew1').value.trim(), n2 = $('cpNew2').value.trim(), box = $('cpMsg');
-    if (!/^\d{6}$/.test(o) || !/^\d{6}$/.test(n1)) { box.innerHTML = msgHtml('err', 'PIN to dokładnie 6 cyfr.'); return; }
+    if (!/^\d{4,10}$/.test(o) || !/^\d{4,10}$/.test(n1)) { box.innerHTML = msgHtml('err', 'PIN to 4-10 cyfr.'); return; }
     if (n1 !== n2) { box.innerHTML = msgHtml('err', 'Nowe PIN-y się różnią.'); return; }
     try {
       const out = await api('changePin', { oldPin: o, newPin: n1 });
