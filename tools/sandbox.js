@@ -13,7 +13,9 @@ function mkSheet(headers) {
     rows,
     appendRow: r => { rows.push(r.slice()); },
     getDataRange: () => ({ getValues: () => rows.map(r => r.slice()) }),
+    getLastRow: () => rows.length,
     getRange: (row, col, nr = 1, nc = 1) => ({
+      getValue: () => rows[row - 1][col - 1],
       setValue: v => { rows[row - 1][col - 1] = v; },
       setValues: vs => { for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) rows[row - 1 + i][col - 1 + j] = vs[i][j]; }
     }),
@@ -21,7 +23,7 @@ function mkSheet(headers) {
   };
 }
 const sheets = {};
-const props = {};
+const props = { SYNC_SECRET: 'sandbox-secret-1234567890' };
 const mails = [];
 const aiCalls = [];
 const drive = []; // atrapa Dysku: {id, name, parent, folder, type, size, trashed}
@@ -50,6 +52,13 @@ const sb = {
   UrlFetchApp: {
     fetch: (url, opt) => {
       if (!opt.payload) return { getResponseCode: () => (/zly/.test(opt.headers['x-goog-api-key']) ? 400 : 200), getContentText: () => '{}' };
+      if (/"action":"(export_state|sync_ping|sync_pin_push)"/.test(opt.payload)) {
+        const ok = JSON.parse(opt.payload).secret === props.SYNC_SECRET;
+        const st = { ok, vehicles: [{ id: 'v1', name: 'Passat', type: 'prywatne' }, { id: 'v2', name: 'Transit', type: 'firmowe' }],
+          fillups: [{ vehicleId: 'v1', date: '2026-09-05', totalCost: 320.5, liters: 50 }, { vehicleId: 'v1', date: '2026-09-20', totalCost: 300, liters: 47 }, { vehicleId: 'v2', date: '2026-09-10', totalCost: 800, liters: 120 }],
+          costs: [{ vehicleId: 'v1', date: '2026-09-12', category: 'Serwis', amount: 450, note: 'olej' }] };
+        return { getResponseCode: () => 200, getContentText: () => JSON.stringify(ok ? st : { ok: false, error: 'Brak autoryzacji' }) };
+      }
       const req = JSON.parse(opt.payload);
       const parts = req.contents[0].parts;
       aiCalls.push({ url, headers: opt.headers, config: req.generationConfig, parts: parts.map(x => x.text != null ? 'text' : x.inline_data.mime_type), prompt: parts[0].text });

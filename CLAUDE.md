@@ -1,8 +1,8 @@
 # Wydatki domowe — pamięć projektu
 
-Domowa appka webowa do paragonów: wrzucasz zdjęcie / zrzut z aplikacji sklepu / PDF, Gemini
-odczytuje pozycje, appka robi narastające zestawienie (miesiąc, kategorie, sklepy) i porównuje
-ceny tych samych produktów między sklepami. Używają jej dwie osoby (Szef + żona), głównie na
+Budżet domowy (od v0.4, 26.09.2026): pokazuje, na co idą pieniądze i gdzie można coś pokombinować.
+Zakładki: Razem (podsumowanie) · Spożywka (paragony: zdjęcie/zrzut/PDF → Gemini → zestawienia, ceny
+między sklepami) · główne grupy z edytowalnego drzewka (start: Koszty stałe, Motoryzacja). Używają jej dwie osoby (Szef + żona), głównie na
 iPhonie. Z użytkownikiem rozmawiaj po polsku („Szefie”); to inżynier, nie programista — tłumacz
 krótko pojęcia przy pierwszym użyciu i rób sam wszystko, co nie wymaga jego logowania.
 Wzorzec architektury i pułapki: skill `ra-ster-mini-app` (ten sam układ co karta-godzin).
@@ -12,7 +12,7 @@ Wzorzec architektury i pułapki: skill `ra-ster-mini-app` (ten sam układ co kar
 - **Frontend**: `index.html` (jeden plik HTML+CSS+JS, bez frameworków i build stepu) → GitHub
   Pages: https://heatcoolfulawkawro-ui.github.io/wydatki-domowe/
 - **Backend**: `Kod.gs` + `appsscript.json` → Apps Script podpięty do Arkusza „Wydatki domowe —
-  dane”. Zakładki tworzą się same: `Users`, `Sessions`, `Links`, `Receipts`, `Audit`.
+  dane”. Zakładki tworzą się same: `Users`, `Sessions`, `Links`, `Receipts`, `Nodes`, `Costs`, `Audit`.
 - **Web App URL** (stała `GAS_URL` w `index.html`) — po pierwszym wdrożeniu NIE MOŻE się zmienić.
 - `.claspignore` — clasp wypycha tylko `Kod.gs` i `appsscript.json`.
 - `tools/sandbox.js` — serwer testowy: prawdziwy `Kod.gs` na atrapie Arkusza, maile do `/__mail`,
@@ -86,7 +86,24 @@ Do zrobienia na PC Szefa (tam są zalogowane `clasp` i `gh`), w tej kolejności:
 - `prod` = „produkt porównawczy” (np. „Twarożek Grani 200 g”, „Banany”) — po nim idzie porównanie
   cen między sklepami. Zmiana nazw kategorii/produktów = migracja istniejących danych.
 
-## Funkcje (stan: 25.09.2026, v0.1 — wdrożona)
+- Zakładka `Nodes` (drzewko budżetu): `id, parent ('' = główna grupa = zakładka), name, order, json
+  ({link:{paliwo:<id pojazdu>, mode:'fuel'|'costs'|'all'}|null}), updatedBy, updatedAt, deleted`. Startowe
+  drzewko (`DEFAULT_TREE`) wstawia się tylko przy pustej zakładce. Spożywki NIE ma w drzewku (to paragony).
+- Zakładka `Costs`: `id, node, date, amount, json, addedBy, createdAt, updatedBy, updatedAt, deleted`.
+  JSON: `{id, node, date, amount, note, repeat?:{every:1|3|6|12, until:'RRRR-MM'|''}, overrides?:{'RRRR-MM':
+  kwota|null=pominięty}, files?}`. Cykliczny = JEDEN wiersz; appka liczy go w każdym miesiącu (`costIn`).
+  Zmiana ceny = „Nowa kwota od tego miesiąca”: stara seria dostaje `until` = poprzedni miesiąc, nowa od tego.
+
+## Funkcje (stan: 26.09.2026, v0.4)
+
+- Budżet (v0.4): zakładka Razem = suma miesiąca, vs poprzedni, średnia 6 mies. (tylko miesiące z danymi),
+  „Na co idą pieniądze” (grupy), „Największe pozycje” i „Wyżej niż zwykle” (liście drzewka + podgrupy
+  spożywki vs średnia 6 mies.). Zakładka grupy = drzewko z sumami; „⋯” przy pozycji: wydatek, podgrupa,
+  nazwa, ↑↓, przenieś (też jako nowa główna grupa), ⛽ Paliwo, usuń (zawartość trzeba przenieść).
+  Drzewko edytują oboje (decyzja Szefa 26.09.2026). Wydatek może mieć fakturę na Dysku (`archive` kind:'cost').
+- Paliwo-PF → budżet: węzeł z `link` liczy tankowania/koszty wybranego auta (tylko odczyt, zawsze
+  aktualne). Wydatki pytają Paliwo akcją `export_state` (dodana w Paliwo-PF 26.09.2026) z `SYNC_SECRET`
+  (ten sam sekret co sync PIN-u konta PF — ustawił go inny czat). Cache w przeglądarce 10 min.
 
 - Logowanie: skrót + PIN 6 cyfr, sesja 60 dni; PIN ustawia właściciel przez jednorazowy link z maila
   (48 h): zaproszenie od admina albo „Nie pamiętam PIN-u” (max 1 mail/min/konto, odpowiedź nie zdradza,
@@ -124,4 +141,5 @@ Do zrobienia na PC Szefa (tam są zalogowane `clasp` i `gh`), w tej kolejności:
   Gemini (503 „high demand”) jest ponowienie i modele zapasowe. Bon za zwrot opakowań: total = PO bonie.
 - Szef ma potwierdzić: 2 paczki parówek na paragonie Biedronki 18.09, co to „Lunchbox 250g” (Lidl 08.09),
   pomidory kiść 500 g za 14,99 zł.
-- Pomysły na później: budżet miesięczny, wykresy trendu cen produktu, eksport do Excela.
+- Pomysły na później: limity/budżet na grupę, wykresy trendu cen produktu, eksport do Excela,
+  ulepszenia Spożywki (Szef zapowiedział). Wydatki budżetu zapisują się tylko online (bez kolejki offline).

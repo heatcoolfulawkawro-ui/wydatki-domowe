@@ -136,13 +136,30 @@
   .testbtn{ display:block; margin:24px auto 12px; background:none; border:none; color:var(--line); font-size:10px; }
   .savetag{ position:fixed; bottom:calc(env(safe-area-inset-bottom,0px) + 110px); left:50%; transform:translateX(-50%); z-index:30; font-size:13px; background:var(--panel2); border:1px solid var(--line); border-radius:20px; padding:7px 14px; opacity:0; transition:opacity .3s; pointer-events:none; }
   .savetag.show{ opacity:1; }
+  /* budżet: główne grupy, drzewko */
+  .gtabs{ display:flex; gap:4px; overflow-x:auto; background:var(--panel); border-radius:var(--radius); padding:4px; scrollbar-width:none; }
+  .gtabs::-webkit-scrollbar{ display:none; }
+  .gtabs button{ flex:1 0 auto; background:none; border:0; color:var(--ink-dim); font-size:14px; padding:9px 11px; border-radius:8px; white-space:nowrap; }
+  .gtabs button[aria-selected=true]{ background:var(--panel2); color:var(--amber); font-weight:600; }
+  .tree{ padding:4px 10px; }
+  .tn{ display:flex; align-items:center; gap:6px; padding:10px 0; border-bottom:1px solid var(--line); cursor:pointer; }
+  .tn .tg{ width:14px; flex:none; color:var(--ink-dim); font-size:12px; }
+  .tn .nm{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tn.zero .num{ color:var(--ink-dim); }
+  .tn .more{ flex:none; background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:2px 10px; font-size:15px; line-height:1.3; }
+  .ent{ display:flex; justify-content:space-between; gap:8px; padding:7px 0; border-bottom:1px dashed var(--line); font-size:13px; cursor:pointer; }
+  .ent.ro{ cursor:default; color:var(--ink-dim); }
+  .nact{ background:var(--panel2); border:1px solid var(--line); border-radius:var(--radius); padding:10px; margin:6px 0; display:flex; flex-direction:column; gap:8px; cursor:default; }
+  .acts{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; }
+  .acts button{ padding:9px 4px; font-size:13px; }
+  .grp{ cursor:pointer; }
 </style>
 </head>
 <body>
 
 <header class="top">
   <!-- Przy KAŻDYM wydaniu: podbij vertag i ustaw buildtag na bieżący czas. -->
-  <h1>Wydatki domowe<span class="vertag">v0.3</span><span class="buildtag">26.09.2026 09:40</span></h1>
+  <h1>Wydatki domowe<span class="vertag">v0.4</span><span class="buildtag">26.09.2026 16:56</span></h1>
   <span class="statusdot" id="statusDot" title="Połączenie z Arkuszem" style="cursor:pointer;"></span>
   <button id="btnHub" title="Rozdzielacz" hidden style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:14px;margin-right:8px;">🏠</button>
   <button class="userbtn" id="userBtn" hidden></button>
@@ -157,11 +174,14 @@
 <main id="scrAuth" hidden></main>
 
 <main id="scrMain" hidden>
+  <nav class="gtabs" id="gTabs" role="tablist"></nav>
   <div class="monthnav">
     <button id="mPrev" aria-label="Poprzedni miesiąc">‹</button>
     <div class="mlabel" id="mLabel"></div>
     <button id="mNext" aria-label="Następny miesiąc">›</button>
   </div>
+  <section id="t-b" class="stack" hidden></section>
+  <div id="foodBox" class="stack">
   <nav class="tabs" role="tablist">
     <button role="tab" data-t="p" aria-selected="true">Paragony</button>
     <button role="tab" data-t="m" aria-selected="false">Miesiąc</button>
@@ -181,10 +201,12 @@
   <section id="t-m" class="stack" hidden></section>
   <section id="t-s" class="stack" hidden></section>
   <section id="t-c" class="stack" hidden></section>
+  </div>
   <button class="testbtn" id="btnTest">test połączenia</button>
 </main>
 
 <main id="scrEdit" hidden></main>
+<main id="scrCost" hidden></main>
 <main id="scrAdmin" hidden></main>
 <main id="scrPin" hidden></main>
 
@@ -196,6 +218,7 @@
 const GAS_URL = 'https://script.google.com/macros/s/AKfycby-n1t8ehXtz9sNEByK-dZbObSAs39RKOovANpGIefLbs2-spAlx1iwdFb9CUK5fVZH/exec';
 
 const LS_AUTH = 'wd_auth_v1', LS_CACHE = 'wd_cache_v1', LS_OUTBOX = 'wd_outbox_v1', LS_UI = 'wd_ui_v1';
+const LS_BUDGET = 'wd_budget_v1', LS_PALIWO = 'wd_paliwo_v1';
 const FOOD = ['Mięso i wędliny', 'Ryby', 'Nabiał i jaja', 'Pieczywo', 'Warzywa i owoce', 'Produkty suche i bakalie',
   'Przyprawy, sosy i przetwory', 'Mrożonki', 'Dania gotowe', 'Słodycze, lody i przekąski', 'Napoje', 'Alkohol'];
 const NONFOOD = ['Chemia i dom', 'Higiena i kosmetyki', 'Kwiaty i inne'];
@@ -230,7 +253,11 @@ const configured = () => GAS_URL.indexOf('__DEPLOYMENT_ID__') < 0;
 let auth = lsGet(LS_AUTH, null);          // {token, user, expires}
 let cache = lsGet(LS_CACHE, { receipts: [] });
 let outbox = lsGet(LS_OUTBOX, []);        // [{op:'save', receipt, base} | {op:'delete', id}]
-const ui = Object.assign({ tab: 'p', ym: null }, lsGet(LS_UI, {}));
+const ui = Object.assign({ tab: 'p', ym: null, g: 'sum', open: [] }, lsGet(LS_UI, {}));
+let budget = lsGet(LS_BUDGET, { nodes: [], costs: [] }); // drzewko kategorii + wydatki (koszty stałe, motoryzacja…)
+let paliwo = lsGet(LS_PALIWO, null);                      // dane z appki Paliwo (tylko odczyt)
+let nodeAct = null;      // panel akcji węzła: {id, mode}
+let ced = null;          // edytor wydatku
 let hasKey = true;
 let openRc = null;       // id rozwiniętego paragonu na liście
 let openProd = null;     // rozwinięty produkt w zakładce Ceny
@@ -338,7 +365,7 @@ function dictionary() {
 
 // ---------- ekrany ----------
 function showScreen(id) {
-  ['scrAuth', 'scrMain', 'scrEdit', 'scrAdmin', 'scrPin'].forEach(s => $(s).hidden = s !== id);
+  ['scrAuth', 'scrMain', 'scrEdit', 'scrCost', 'scrAdmin', 'scrPin'].forEach(s => $(s).hidden = s !== id);
   $('menu').hidden = true;
   window.scrollTo(0, 0);
 }
@@ -494,6 +521,7 @@ function startMain() {
   renderMain();
   renderSyncInfo();
   sync();
+  loadBudget();
   api('me').then(out => { if (out && out.ok) { auth.user = out.user; lsSet(LS_AUTH, auth); hasKey = out.hasKey; renderUserBtn(); } }).catch(() => {});
 }
 
@@ -504,8 +532,18 @@ function setTab(t) {
   renderMain();
 }
 
+function setG(g) { ui.g = g; lsSet(LS_UI, ui); nodeAct = null; renderMain(); window.scrollTo(0, 0); }
+
 function renderMain() {
   $('mLabel').textContent = ymLabel(ui.ym);
+  const roots = kids('');
+  if (ui.g !== 'sum' && ui.g !== 'food' && !roots.some(n => n.id === ui.g)) ui.g = 'sum';
+  $('gTabs').innerHTML = [{ id: 'sum', name: 'Razem' }, { id: 'food', name: 'Spożywka' }].concat(roots)
+    .map(g => `<button role="tab" data-g="${esc(g.id)}" aria-selected="${ui.g === g.id}">${esc(g.name)}</button>`).join('');
+  const food = ui.g === 'food';
+  $('foodBox').hidden = !food;
+  $('t-b').hidden = food;
+  if (!food) return ui.g === 'sum' ? renderBudgetSum() : renderBudgetGroup(ui.g);
   const t = ui.tab;
   if (t === 'p') renderReceipts();
   else if (t === 'm') renderMonth();
@@ -627,6 +665,350 @@ function renderPrices() {
   }
   $('t-c').innerHTML = h;
 }
+
+// ---------- budżet: dane ----------
+function saveBudget() { lsSet(LS_BUDGET, budget); totCache = {}; }
+async function loadBudget() {
+  try {
+    const out = await api('budget');
+    if (out && out.ok) { budget = { nodes: out.nodes, costs: out.costs }; saveBudget(); if (!$('scrMain').hidden && ui.g !== 'food') renderMain(); }
+    if (budget.nodes.some(n => n.link)) loadPaliwo(false);
+  } catch (e) {}
+}
+// Dane z Paliwo odświeżamy najwyżej co 10 min (albo na żądanie).
+async function loadPaliwo(force) {
+  if (!force && paliwo && Date.now() - paliwo.at < 10 * 60 * 1000) return;
+  try {
+    const out = await api('paliwo');
+    if (out && out.ok) { paliwo = { vehicles: out.vehicles, fillups: out.fillups, costs: out.costs, at: Date.now() }; lsSet(LS_PALIWO, paliwo); totCache = {}; if (!$('scrMain').hidden && ui.g !== 'food') renderMain(); }
+  } catch (e) {}
+}
+const B_ERR = { cycle: 'nie można przenieść grupy do jej własnej podgrupy', moveTo: 'wybierz, dokąd przenieść zawartość', limit: 'za dużo grup', conflict: 'ktoś zmienił to w międzyczasie — odśwież', bad: 'sprawdź dane', notfound: 'tej pozycji już nie ma — odśwież' };
+async function bApi(action, payload) {
+  try {
+    const out = await api(action, payload);
+    if (!out || !out.ok) { toast('Nie zapisano: ' + (B_ERR[out && out.error] || (out && out.error) || 'błąd'), 4000); return null; }
+    if (out.nodes) budget.nodes = out.nodes;
+    if (out.costs) budget.costs = out.costs;
+    saveBudget();
+    return out;
+  } catch (e) { toast('Nie zapisano — brak połączenia', 4000); return null; }
+}
+
+// ---------- budżet: wyliczenia ----------
+const nodeById = id => budget.nodes.find(n => n.id === id);
+const kids = id => budget.nodes.filter(n => n.parent === id).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name, 'pl'));
+function subtree(id) { const out = [id]; for (let k = 0; k < out.length; k++) kids(out[k]).forEach(n => out.push(n.id)); return out; }
+function pathOf(id) { const p = []; let n = nodeById(id); while (n) { p.unshift(n.name); n = nodeById(n.parent); } return p; }
+function rootOf(id) { let n = nodeById(id); while (n && n.parent) n = nodeById(n.parent); return n ? n.id : null; }
+const ymDiff = (a, b) => (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7));
+const curYm = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); };
+
+// Kwota wydatku w danym miesiącu (cykliczne: co N mies. od daty startu, z korektami dla pojedynczych miesięcy).
+function costIn(c, ym) {
+  const start = ymOf(c.date);
+  if (!c.repeat) return start === ym ? c.amount : 0;
+  if (ym < start || (c.repeat.until && ym > c.repeat.until) || ymDiff(start, ym) % c.repeat.every) return 0;
+  if (c.overrides && ym in c.overrides) return c.overrides[ym] == null ? 0 : c.overrides[ym];
+  return c.amount;
+}
+// Pozycje z appki Paliwo liczone w węźle z podpiętym pojazdem.
+function linkLines(n, ym) {
+  if (!n.link || !paliwo) return [];
+  const v = n.link.paliwo, mode = n.link.mode || 'all', out = [];
+  if (mode !== 'costs') paliwo.fillups.filter(f => f.vehicleId === v && ymOf(f.date) === ym)
+    .forEach(f => out.push({ date: f.date, amount: f.amount, label: '⛽ tankowanie' + (f.liters ? ' ' + numStr(f.liters) + ' l' : '') }));
+  if (mode !== 'fuel') paliwo.costs.filter(c => c.vehicleId === v && ymOf(c.date) === ym)
+    .forEach(c => out.push({ date: c.date, amount: c.amount, label: '🔧 ' + (c.category || 'koszt') + (c.note ? ': ' + c.note : '') }));
+  return out.sort((a, b) => b.date.localeCompare(a.date));
+}
+let totCache = {};
+// Suma każdego węzła w miesiącu (własne wydatki + Paliwo + wszystkie podgrupy).
+function totals(ym) {
+  if (totCache[ym]) return totCache[ym];
+  const own = new Map(budget.nodes.map(n => [n.id, sum(linkLines(n, ym), l => l.amount)]));
+  budget.costs.forEach(c => { if (own.has(c.node)) own.set(c.node, own.get(c.node) + costIn(c, ym)); });
+  const t = new Map();
+  const walk = id => { let s = own.get(id) || 0; kids(id).forEach(k => s += walk(k.id)); t.set(id, r2(s)); return s; };
+  kids('').forEach(n => walk(n.id));
+  return (totCache[ym] = t);
+}
+function foodIn(ym) {
+  const goods = goodsOf(monthReceipts(ym));
+  const by = {}; goods.forEach(i => by[i.cat] = (by[i.cat] || 0) + i.net);
+  return { total: r2(sum(goods)), food: r2(sum(goods.filter(i => FOOD_SET.has(i.cat)))), by };
+}
+const groupIn = (g, ym) => g === 'food' ? foodIn(ym).total : (totals(ym).get(g) || 0);
+const grandIn = ym => r2(foodIn(ym).total + sum(kids(''), n => totals(ym).get(n.id) || 0));
+// Średnia z 6 poprzednich miesięcy, w których w ogóle są jakieś dane.
+function avgPrev(fn, ym) {
+  const vals = [];
+  for (let k = 1; k <= 6; k++) { const m = shiftYm(ym, -k); if (grandIn(m) > 0) vals.push(fn(m)); }
+  return vals.length ? sum(vals, v => v) / vals.length : null;
+}
+// Najdrobniejsze pozycje (liście drzewka + podgrupy spożywki) — do „największych” i „wyżej niż zwykle”.
+function leafItems(ym) {
+  const t = totals(ym), f = foodIn(ym), out = [];
+  budget.nodes.filter(n => !kids(n.id).length).forEach(n => out.push({ key: n.id, name: n.name, path: pathOf(n.id).slice(0, -1).join(' › '), v: t.get(n.id) || 0, g: rootOf(n.id) }));
+  out.push({ key: 'f:food', name: 'Jedzenie', path: 'Spożywka', v: f.food, g: 'food' });
+  NONFOOD.forEach(c => out.push({ key: 'f:' + c, name: c, path: 'Spożywka', v: r2(f.by[c] || 0), g: 'food' }));
+  return out;
+}
+const deltaChip = (v, avg) => {
+  if (avg == null) return '';
+  const d = v - avg;
+  if (Math.abs(d) < 30 || Math.abs(d) < avg * 0.1) return '';
+  return d > 0 ? `<span class="chip warn">+${zl0(d)} vs śr.</span>` : `<span class="chip ok">−${zl0(-d)} vs śr.</span>`;
+};
+
+// ---------- budżet: widoki ----------
+function renderBudgetSum() {
+  const ym = ui.ym, total = grandIn(ym), prev = grandIn(shiftYm(ym, -1)), avg = avgPrev(grandIn, ym);
+  const groups = [{ id: 'food', name: 'Spożywka i chemia' }].concat(kids('')).map(g => ({ id: g.id, name: g.name, v: groupIn(g.id, ym), avg: avgPrev(m => groupIn(g.id, m), ym) }));
+  const mx = Math.max(1, ...groups.map(g => g.v));
+  let h = `<div class="kpis">
+    <div class="kpi"><small>Razem</small><b>${zl0(total)}</b><small>${ymLabel(ym)}</small></div>
+    <div class="kpi"><small>vs poprzedni</small><b class="${total - prev > 0 ? 'r' : 'g'}">${prev ? (total - prev > 0 ? '+' : '−') + zl0(Math.abs(total - prev)) : '—'}</b><small>${prev ? zl0(prev) : 'brak danych'}</small></div>
+    <div class="kpi"><small>średnio</small><b>${avg != null ? zl0(avg) : '—'}</b><small>ostatnie 6 mies.</small></div>
+  </div>
+  <div class="card"><p class="h">Na co idą pieniądze</p>${groups.map(g => `<div class="catrow grp" data-g="${esc(g.id)}"><div class="row"><span>${esc(g.name)} ${deltaChip(g.v, g.avg)}</span><span class="num">${zl(g.v)} zł · ${pct(g.v, total)}%</span></div><div class="bar"><i style="width:${g.v / mx * 100}%"></i></div></div>`).join('')}
+  <div class="muted small" style="margin-top:6px">Dotknij grupy, żeby zobaczyć szczegóły.</div></div>`;
+  const items = leafItems(ym).filter(x => x.v > 0).sort((a, b) => b.v - a.v).slice(0, 10);
+  h += `<div class="card"><p class="h">Największe pozycje</p>${items.length ? items.map(x => `<div class="catrow grp" data-g="${esc(x.g)}"><div class="row"><span>${esc(x.name)}<br><span class="muted small">${esc(x.path)}</span></span><span class="num">${zl(x.v)} zł</span></div></div>`).join('') : '<div class="muted">Brak wydatków w tym miesiącu.</div>'}</div>`;
+  const avgMap = {};
+  for (let k = 1; k <= 6; k++) { const m = shiftYm(ym, -k); if (grandIn(m) > 0) leafItems(m).forEach(x => (avgMap[x.key] = avgMap[x.key] || []).push(x.v)); }
+  const up = leafItems(ym).map(x => Object.assign(x, { avg: avgMap[x.key] ? sum(avgMap[x.key], v => v) / avgMap[x.key].length : null }))
+    .filter(x => x.avg != null && x.v - x.avg >= 20 && x.v > x.avg * 1.2).sort((a, b) => (b.v - b.avg) - (a.v - a.avg)).slice(0, 8);
+  h += `<div class="card"><p class="h">Wyżej niż zwykle</p><div class="muted small" style="margin-bottom:6px">W porównaniu ze średnią z ostatnich 6 miesięcy — tu warto poszukać oszczędności</div>${up.length ? up.map(x => `<div class="catrow grp" data-g="${esc(x.g)}"><div class="row"><span>${esc(x.name)}<br><span class="muted small">${esc(x.path)} · śr. ${zl0(x.avg)}</span></span><span class="num r">+${zl0(x.v - x.avg)}</span></div></div>`).join('') : '<div class="muted">Nic nie odstaje od średniej.</div>'}</div>`;
+  const months = []; for (let k = 5; k >= 0; k--) months.push(shiftYm(ym, -k));
+  const mt = months.map(grandIn), mxm = Math.max(1, ...mt);
+  h += `<div class="card"><p class="h">Ostatnie 6 miesięcy</p><div class="cols">${months.map((m, k) =>
+    `<div class="${m === ym ? 'cur' : ''}"><em>${mt[k] ? Math.round(mt[k]) : ''}</em><span style="height:${mt[k] / mxm * 80}%"></span>${MONTHS_SHORT[+m.slice(5, 7) - 1]}</div>`).join('')}</div>
+    ${ym > curYm() ? '<div class="muted small" style="margin-top:6px">Przyszły miesiąc — widać tylko zaplanowane koszty cykliczne.</div>' : ''}</div>`;
+  $('t-b').innerHTML = h;
+}
+
+function renderBudgetGroup(rootId) {
+  const ym = ui.ym, root = nodeById(rootId), t = totals(ym);
+  const avg = avgPrev(m => groupIn(rootId, m), ym);
+  const open = new Set(ui.open);
+  const nodeRow = (n, depth) => {
+    const ch = kids(n.id), v = t.get(n.id) || 0;
+    const own = budget.costs.filter(c => c.node === n.id && costIn(c, ym) !== 0), lines = linkLines(n, ym);
+    const hasRep = budget.costs.some(c => c.node === n.id && c.repeat);
+    const isOpen = open.has(n.id), expandable = ch.length || own.length || lines.length;
+    let h = `<div class="tn${v ? '' : ' zero'}" data-n="${esc(n.id)}" style="padding-left:${depth * 16}px">
+      <span class="tg">${expandable ? (isOpen ? '▾' : '▸') : ''}</span>
+      <span class="nm">${esc(n.name)}${hasRep ? ' <span class="muted small">↻</span>' : ''}${n.link ? ' <span class="chip">⛽ Paliwo</span>' : ''}</span>
+      <b class="num">${zl(v)}</b><button class="more" data-more="${esc(n.id)}" aria-label="Akcje: ${esc(n.name)}">⋯</button></div>`;
+    if (nodeAct && nodeAct.id === n.id) h += actPanel(n);
+    if (isOpen) {
+      const pad = `style="padding-left:${depth * 16 + 20}px"`;
+      h += own.map(c => `<div class="ent" data-cost="${esc(c.id)}" ${pad}><span>${dm(c.repeat ? ym + c.date.slice(7) : c.date)} ${esc(c.note || n.name)}${c.repeat ? ' <span class="muted">↻</span>' : ''}${(c.files || []).length ? ' 📎' : ''}</span><span class="num">${zl(costIn(c, ym))}</span></div>`).join('');
+      h += lines.map(l => `<div class="ent ro" ${pad}><span>${dm(l.date)} ${esc(l.label)}</span><span class="num">${zl(l.amount)}</span></div>`).join('');
+      h += ch.map(k => nodeRow(k, depth + 1)).join('');
+    }
+    return h;
+  };
+  let h = `<div class="card"><div class="row"><b style="font-size:17px">${esc(root.name)}</b><b class="num" style="font-size:17px">${zl(t.get(rootId) || 0)} zł</b></div>
+    <div class="row muted small"><span>${ymLabel(ym)}${avg != null ? ' · średnio ' + zl0(avg) + '/mies.' : ''}</span><span>${deltaChip(t.get(rootId) || 0, avg)}</span></div>
+    <div class="grid2" style="margin-top:8px"><button class="btn2" data-rootcost="${esc(rootId)}">＋ Wydatek</button><button class="btn2" data-more="${esc(rootId)}">⋯ Grupa</button></div>
+    ${nodeAct && nodeAct.id === rootId ? actPanel(root) : ''}</div>`;
+  const ch = kids(rootId);
+  h += `<div class="card tree">${ch.length ? ch.map(n => nodeRow(n, 0)).join('') : '<div class="muted" style="padding:8px 0">Pusta grupa — dodaj podgrupę przyciskiem „⋯ Grupa”.</div>'}</div>
+    <div class="muted small">Dotknij pozycji, żeby rozwinąć. „⋯” — dodaj wydatek lub podgrupę, zmień nazwę, kolejność, przenieś, podepnij auto z Paliwo, usuń.</div>
+    <button class="linkbtn" data-newroot="1">＋ Nowa główna grupa (zakładka)</button>`;
+  $('t-b').innerHTML = h;
+}
+
+// Opcje <select> z całym drzewkiem (wcięcia), bez podanych id.
+function nodeOptions(sel, exclude) {
+  const ex = new Set(exclude || []);
+  const out = [];
+  const walk = (id, d) => kids(id).forEach(n => { if (ex.has(n.id)) return; out.push(`<option value="${esc(n.id)}"${n.id === sel ? ' selected' : ''}>${'  '.repeat(d).replace(/ /g, '&nbsp;')}${d ? '└ ' : ''}${esc(n.name)}</option>`); walk(n.id, d + 1); });
+  walk('', 0);
+  return out.join('');
+}
+
+function actPanel(n) {
+  const m = nodeAct.mode, isRoot = !n.parent;
+  const hasContent = kids(n.id).length || budget.costs.some(c => c.node === n.id);
+  if (m === 'add' || m === 'rename') return `<div class="nact"><label class="f">${m === 'add' ? 'Nowa podgrupa w „' + esc(n.name) + '”' : 'Nowa nazwa'}<input id="naName" maxlength="60" value="${m === 'rename' ? esc(n.name) : ''}" placeholder="np. Spotify"></label>
+    <div class="grid2"><button class="btn2" data-act="menu">Anuluj</button><button class="btn2" data-act="saveName" style="color:var(--amber)">Zapisz</button></div></div>`;
+  if (m === 'move') return `<div class="nact"><label class="f">Przenieś „${esc(n.name)}” (z podgrupami i wydatkami) do:<select id="naMove"><option value="">— jako główna grupa (osobna zakładka) —</option>${nodeOptions(n.parent, subtree(n.id))}</select></label>
+    <div class="grid2"><button class="btn2" data-act="menu">Anuluj</button><button class="btn2" data-act="doMove" style="color:var(--amber)">Przenieś</button></div></div>`;
+  if (m === 'link') {
+    if (!paliwo) { loadPaliwo(true); return `<div class="nact"><div class="busy"><div class="spin"></div><span class="muted">Pobieram auta z appki Paliwo…</span></div><button class="btn2" data-act="menu">Anuluj</button></div>`; }
+    const l = n.link || {}, mode = l.mode || (/paliw/i.test(n.name) ? 'fuel' : 'all');
+    return `<div class="nact"><div class="muted small">Wydatki z appki Paliwo dla wybranego auta będą się same liczyć w „${esc(n.name)}” (tylko odczyt, zawsze aktualne).</div>
+      <label class="f">Auto z Paliwo<select id="naVeh"><option value="">— nie podpinaj —</option>${paliwo.vehicles.map(v => `<option value="${esc(v.id)}"${v.id === l.paliwo ? ' selected' : ''}>${esc(v.name)}${v.type === 'prywatne' ? ' (prywatne)' : ' (firmowe)'}</option>`).join('')}</select></label>
+      <label class="f">Co liczyć<select id="naMode"><option value="fuel"${mode === 'fuel' ? ' selected' : ''}>tylko tankowania</option><option value="costs"${mode === 'costs' ? ' selected' : ''}>tylko koszty (serwis, OC…)</option><option value="all"${mode === 'all' ? ' selected' : ''}>tankowania i koszty</option></select></label>
+      <div class="grid2"><button class="btn2" data-act="menu">Anuluj</button><button class="btn2" data-act="doLink" style="color:var(--amber)">Zapisz</button></div></div>`;
+  }
+  if (m === 'delete') return `<div class="nact">${hasContent
+    ? `<label class="f">„${esc(n.name)}” ma podgrupy lub wydatki. Przenieś je do:<select id="naDel"><option value="">— wybierz —</option>${nodeOptions('', subtree(n.id))}</select></label>`
+    : `<div>Usunąć „${esc(n.name)}”?</div>`}
+    <div class="grid2"><button class="btn2" data-act="menu">Anuluj</button><button class="btn2 danger" data-act="doDelete">Usuń</button></div></div>`;
+  return `<div class="nact"><div class="acts">
+    <button class="btn2" data-act="cost">＋ Wydatek</button><button class="btn2" data-act="add">＋ Podgrupa</button><button class="btn2" data-act="rename">✎ Nazwa</button>
+    <button class="btn2" data-act="up">↑ Wyżej</button><button class="btn2" data-act="down">↓ Niżej</button><button class="btn2" data-act="move">⇄ Przenieś</button>
+    ${isRoot ? '' : '<button class="btn2" data-act="link">⛽ Paliwo</button>'}<button class="btn2 danger" data-act="delete">🗑 Usuń</button><button class="btn2" data-act="close">✕ Zamknij</button>
+  </div></div>`;
+}
+
+async function budgetClick(e) {
+  const t = e.target.closest('[data-g],[data-more],[data-act],[data-n],[data-cost],[data-rootcost],[data-newroot]');
+  if (!t) return;
+  if (t.dataset.g) return setG(t.dataset.g);
+  if (t.dataset.more) { e.stopPropagation(); nodeAct = nodeAct && nodeAct.id === t.dataset.more ? null : { id: t.dataset.more, mode: 'menu' }; return renderMain(); }
+  if (t.dataset.rootcost) return openCost(null, t.dataset.rootcost);
+  if (t.dataset.cost) { const c = budget.costs.find(x => x.id === t.dataset.cost); if (c) openCost(c); return; }
+  if (t.dataset.newroot) { nodeAct = { id: '', mode: 'newroot' }; const name = prompt('Nazwa nowej głównej grupy (np. Dom i ogród, Zdrowie, Dzieci):'); nodeAct = null; if (name && name.trim()) { const out = await bApi('node.save', { node: { name: name.trim(), parent: '' } }); if (out) { toast('Dodano grupę'); const r = kids('').find(n => n.name === name.trim()); if (r) return setG(r.id); } } return renderMain(); }
+  if (t.dataset.n) {
+    if (e.target.closest('.nact')) return;
+    const id = t.dataset.n, s = new Set(ui.open);
+    s.has(id) ? s.delete(id) : s.add(id);
+    ui.open = [...s]; lsSet(LS_UI, ui); return renderMain();
+  }
+  if (!t.dataset.act || !nodeAct) return;
+  const n = nodeById(nodeAct.id), a = t.dataset.act;
+  if (!n) { nodeAct = null; return renderMain(); }
+  if (a === 'close') { nodeAct = null; return renderMain(); }
+  if (['menu', 'add', 'rename', 'move', 'link', 'delete'].includes(a)) { nodeAct.mode = a; renderMain(); const i = $('naName'); if (i) i.focus(); return; }
+  if (a === 'cost') { nodeAct = null; return openCost(null, n.id); }
+  if (a === 'up' || a === 'down') {
+    const sib = kids(n.parent).map(x => x.id), k = sib.indexOf(n.id), j = a === 'up' ? k - 1 : k + 1;
+    if (j < 0 || j >= sib.length) return;
+    [sib[k], sib[j]] = [sib[j], sib[k]];
+    if (await bApi('node.order', { ids: sib })) renderMain();
+    return;
+  }
+  let out = null;
+  if (a === 'saveName') {
+    const name = $('naName').value.trim(); if (!name) return;
+    out = nodeAct.mode === 'add' ? await bApi('node.save', { node: { name, parent: n.id } }) : await bApi('node.save', { node: { id: n.id, name, parent: n.parent } });
+    if (out && nodeAct && nodeAct.mode === 'add') { ui.open = [...new Set(ui.open.concat(n.id))]; lsSet(LS_UI, ui); }
+  } else if (a === 'doMove') {
+    const to = $('naMove').value;
+    out = await bApi('node.save', { node: { id: n.id, name: n.name, parent: to } });
+    if (out && !to) { nodeAct = null; toast('Przeniesiono jako nową zakładkę'); return setG(n.id); }
+  } else if (a === 'doLink') {
+    const v = $('naVeh').value;
+    out = await bApi('node.save', { node: { id: n.id, name: n.name, parent: n.parent, link: v ? { paliwo: v, mode: $('naMode').value } : null } });
+  } else if (a === 'doDelete') {
+    const sel = $('naDel');
+    if (sel && !sel.value) { toast('Wybierz, dokąd przenieść zawartość', 3000); return; }
+    out = await bApi('node.delete', { id: n.id, moveTo: sel ? sel.value : '' });
+    if (out && ui.g === n.id) { nodeAct = null; return setG('sum'); }
+  }
+  if (out) { nodeAct = null; toast('Zapisano'); renderMain(); }
+}
+
+// ---------- budżet: edytor wydatku ----------
+function openCost(c, nodeId) {
+  const isNew = !c;
+  const today = new Date(), iso = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+  const day = ui.ym === curYm() ? iso : ui.ym + '-01';
+  c = c ? JSON.parse(JSON.stringify(c)) : { id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), node: nodeId, date: day, amount: 0, note: '' };
+  ced = { c, isNew, ym: ui.ym, base: isNew ? null : c.updatedAt || null, orig: [], confirmDel: false };
+  showScreen('scrCost');
+  renderCost();
+}
+
+function renderCost() {
+  const c = ced.c, rep = c.repeat ? String(c.repeat.every) : '0';
+  const ov = c.repeat && !ced.isNew && c.overrides && ced.ym in c.overrides;
+  const inCtx = c.repeat && !ced.isNew && costIn(Object.assign({}, c, { overrides: {} }), ced.ym) !== 0;
+  $('scrCost').innerHTML = `<div class="pagehead"><button class="btn2" id="ceBack">‹ Wróć</button><h2>${ced.isNew ? 'Nowy wydatek' : 'Wydatek'}</h2></div>
+    <div class="card stack">
+      <label class="f">Gdzie<select id="ceNode">${nodeOptions(c.node)}</select></label>
+      <div class="grid2">
+        <label class="f">Kwota (zł)<input id="ceAmt" inputmode="decimal" value="${c.amount ? numStr(c.amount) : ''}" placeholder="0,00"></label>
+        <label class="f">${c.repeat ? 'Od (pierwszy raz)' : 'Data'}<input id="ceDate" type="date" value="${esc(c.date)}"></label>
+      </div>
+      <label class="f">Opis<input id="ceNote" maxlength="200" value="${esc(c.note)}" placeholder="np. rachunek za wrzesień"></label>
+      <div class="grid2">
+        <label class="f">Powtarzaj<select id="ceRep"><option value="0"${rep === '0' ? ' selected' : ''}>nie (jednorazowy)</option><option value="1"${rep === '1' ? ' selected' : ''}>co miesiąc</option><option value="3"${rep === '3' ? ' selected' : ''}>co 3 miesiące</option><option value="6"${rep === '6' ? ' selected' : ''}>co pół roku</option><option value="12"${rep === '12' ? ' selected' : ''}>co rok</option></select></label>
+        <label class="f"${c.repeat ? '' : ' hidden'} id="ceUntilL">Do (opcjonalnie)<input id="ceUntil" type="month" value="${esc(c.repeat ? c.repeat.until : '')}"></label>
+      </div>
+      ${c.repeat ? '<div class="muted small">Cykliczny — appka sama liczy go w każdym miesiącu. Przy zmianie ceny użyj „Nowa kwota od tego miesiąca”, żeby nie zmieniać historii.</div>' : ''}
+    </div>
+    ${inCtx ? `<div class="card stack"><p class="h">Tylko ${ymLabel(ced.ym)}</p>
+      <div class="muted small">${ov ? (c.overrides[ced.ym] == null ? 'W tym miesiącu pominięty.' : 'W tym miesiącu inna kwota: ' + zl(c.overrides[ced.ym]) + ' zł.') : 'W tym miesiącu liczy się ' + zl(c.amount) + ' zł.'}</div>
+      <div class="grid2"><input id="ceOv" inputmode="decimal" placeholder="inna kwota"><button class="btn2" data-ce="ov">Ustaw w tym mies.</button></div>
+      <div class="grid2"><button class="btn2" data-ce="skip">Pomiń ten miesiąc</button>${ov ? '<button class="btn2" data-ce="clear">Przywróć zwykłą</button>' : '<span></span>'}</div>
+      <p class="h" style="margin-top:6px">Zmiana ceny od ${ymLabel(ced.ym)}</p>
+      <div class="grid2"><input id="ceNew" inputmode="decimal" placeholder="nowa kwota"><button class="btn2" data-ce="split">Nowa kwota od tego mies.</button></div>
+    </div>` : ''}
+    <div class="card stack"><p class="h">📎 Faktura / dokument na Dysku</p>
+      ${(c.files || []).map(f => `<a class="small" href="https://drive.google.com/file/d/${encodeURIComponent(f.id)}/view" target="_blank" rel="noopener">🖼 ${esc(f.name)}</a>`).join('')}
+      ${ced.orig.map(f => `<div class="small muted">⏳ ${esc(f.name || 'plik')} — wyślę na Dysk po „Zapisz”</div>`).join('')}
+      <label class="btn2" style="position:relative;overflow:hidden;text-align:center">Dołącz plik<input type="file" id="ceOrig" accept="image/*,application/pdf" multiple style="position:absolute;inset:0;opacity:0;font-size:200px"></label>
+    </div>
+    <div id="ceMsg"></div>
+    <div class="sumbar"><button class="cta" id="ceSave">Zapisz</button>
+      ${ced.isNew ? '' : `<button class="btn2 danger" id="ceDel">${ced.confirmDel ? 'Na pewno usunąć? Dotknij jeszcze raz' : 'Usuń wydatek'}</button>`}</div>`;
+}
+
+// Przepisuje pola formularza do ced.c (bez zapisu).
+function readCostForm() {
+  const c = ced.c;
+  c.node = $('ceNode').value;
+  c.amount = r2(num($('ceAmt').value));
+  c.date = $('ceDate').value;
+  c.note = $('ceNote').value.trim();
+  const every = +$('ceRep').value;
+  if (every) c.repeat = { every, until: $('ceUntil').value || '' };
+  else { delete c.repeat; delete c.overrides; }
+}
+
+async function saveCostNow(extra) {
+  const c = ced.c;
+  if (!c.node || !/^\d{4}-\d{2}-\d{2}$/.test(c.date) || !c.amount) { $('ceMsg').innerHTML = msgHtml('err', 'Uzupełnij kwotę, datę i miejsce w drzewku.'); return false; }
+  const out = await bApi('cost.save', { cost: c, baseUpdatedAt: ced.base });
+  if (!out) return false;
+  const k = budget.costs.findIndex(x => x.id === out.cost.id);
+  k >= 0 ? budget.costs[k] = out.cost : budget.costs.push(out.cost);
+  if (extra) { const o2 = await bApi('cost.save', { cost: extra }); if (o2) budget.costs.push(o2.cost); }
+  saveBudget();
+  return out.cost;
+}
+
+async function costClick(e) {
+  const t = e.target.closest('button');
+  if (!t || !ced) return;
+  if (t.id === 'ceBack') { ced = null; return startMain(); }
+  readCostForm();
+  const c = ced.c;
+  if (t.id === 'ceDel') {
+    if (!ced.confirmDel) { ced.confirmDel = true; return renderCost(); }
+    if (await bApi('cost.delete', { id: c.id })) { budget.costs = budget.costs.filter(x => x.id !== c.id); saveBudget(); ced = null; toast('Usunięto'); startMain(); }
+    return;
+  }
+  let extra = null;
+  if (t.dataset.ce === 'ov' || t.dataset.ce === 'skip' || t.dataset.ce === 'clear') {
+    c.overrides = c.overrides || {};
+    if (t.dataset.ce === 'ov') { const v = $('ceOv').value.trim(); if (!v) return; c.overrides[ced.ym] = r2(num(v)); }
+    else if (t.dataset.ce === 'skip') c.overrides[ced.ym] = null;
+    else delete c.overrides[ced.ym];
+  } else if (t.dataset.ce === 'split') {
+    const v = $('ceNew').value.trim(); if (!v) return;
+    // Stara seria kończy się miesiąc wcześniej, nowa startuje od tego miesiąca z nową kwotą.
+    const oldUntil = c.repeat.until;
+    c.repeat = Object.assign({}, c.repeat, { until: shiftYm(ced.ym, -1) });
+    extra = { id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8), node: c.node, date: ced.ym + c.date.slice(7), amount: r2(num(v)), note: c.note, repeat: { every: c.repeat.every, until: oldUntil } };
+  } else if (t.id !== 'ceSave') return;
+  const files = ced.orig, saved = await saveCostNow(extra);
+  if (!saved) return;
+  toast('Zapisano');
+  const g = rootOf(saved.node);
+  ui.open = [...new Set(ui.open.concat(pathIds(saved.node)))]; lsSet(LS_UI, ui);
+  ced = null;
+  if (g) ui.g = g;
+  startMain();
+  if (files.length) uploadOriginals(saved.id, files, 'cost');
+}
+function pathIds(id) { const p = []; let n = nodeById(id); while (n && n.parent) { p.unshift(n.id); n = nodeById(n.parent); } return p; } // bez głównej grupy
 
 // ---------- dodawanie paragonu: pliki → Gemini (przez Kod.gs) ----------
 function readAsDataURL(file) { return new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = no; fr.readAsDataURL(file); }); }
@@ -783,9 +1165,10 @@ function origHtml() {
     <label class="btn2" style="position:relative;overflow:hidden;text-align:center">Dołącz oryginał<input type="file" id="edOrig" accept="image/*,application/pdf" multiple style="position:absolute;inset:0;opacity:0;font-size:200px"></label>`;
 }
 
-// Wysyła oryginały na Dysk, gdy paragon jest już w Arkuszu (czeka na kolejkę zmian).
-async function uploadOriginals(id, files) {
-  const pending = () => outbox.some(o => o.op === 'save' && o.receipt.id === id);
+// Wysyła oryginały na Dysk, gdy paragon/wydatek jest już w Arkuszu (paragon czeka na kolejkę zmian).
+async function uploadOriginals(id, files, kind) {
+  kind = kind || 'receipt';
+  const pending = () => kind === 'receipt' && outbox.some(o => o.op === 'save' && o.receipt.id === id);
   for (let i = 0; i < 90 && pending(); i++) { if (!syncing) sync(); await sleep(1000); }
   if (pending()) { toast('Oryginał nie zapisany (brak połączenia) — dołącz go później w edytorze', 5000); return; }
   toast('Zapisuję oryginał na Dysku…', 60000);
@@ -793,12 +1176,12 @@ async function uploadOriginals(id, files) {
     let list = null;
     for (const f of files) {
       const type = f.type || (/\.pdf$/i.test(f.name) ? 'application/pdf' : 'image/jpeg');
-      const out = await api('archive', { id, file: { type, data: (await readAsDataURL(f)).split(',')[1] }, more: files.length > 1 });
+      const out = await api('archive', { kind, id, file: { type, data: (await readAsDataURL(f)).split(',')[1] }, more: files.length > 1 });
       if (!out || !out.ok) throw new Error(out && out.error || 'server');
       list = out.files;
     }
-    const rc = cache.receipts.find(x => x.id === id);
-    if (rc && list) { rc.files = list; saveLocal(); }
+    const rc = kind === 'cost' ? budget.costs.find(x => x.id === id) : cache.receipts.find(x => x.id === id);
+    if (rc && list) { rc.files = list; kind === 'cost' ? saveBudget() : saveLocal(); }
     toast(`Oryginał na Dysku ✓ (${files.length}) — możesz usunąć z telefonu`, 5000);
     if (!$('scrMain').hidden) renderMain();
   } catch (e) {
@@ -1016,8 +1399,8 @@ function normalizeImported(x) {
 
 // ---------- zdarzenia ----------
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => setTab(b.dataset.t));
-$('mPrev').onclick = () => { ui.ym = shiftYm(ui.ym, -1); lsSet(LS_UI, ui); openRc = null; renderMain(); };
-$('mNext').onclick = () => { ui.ym = shiftYm(ui.ym, 1); lsSet(LS_UI, ui); openRc = null; renderMain(); };
+$('mPrev').onclick = () => { ui.ym = shiftYm(ui.ym, -1); lsSet(LS_UI, ui); openRc = null; nodeAct = null; renderMain(); };
+$('mNext').onclick = () => { ui.ym = shiftYm(ui.ym, 1); lsSet(LS_UI, ui); openRc = null; nodeAct = null; renderMain(); };
 $('fileIn').onchange = e => { const f = [...e.target.files]; e.target.value = ''; if (f.length) onFiles(f); };
 $('btnManual').onclick = () => openEditor({ id: newId(), shop: '', place: '', date: new Date().toISOString().slice(0, 10), time: '', total: 0, pay: '', items: [], source: 'manual' }, true);
 $('rcList').onclick = e => {
@@ -1030,6 +1413,14 @@ $('rcList').onclick = e => {
   if (t.dataset.delyes) { const id = t.dataset.delyes; pendingDelete = null; openRc = null; queue({ op: 'delete', id }); toast('Usunięto'); }
 };
 $('t-c').onclick = e => { const t = e.target.closest('[data-prod]'); if (!t) return; openProd = openProd === t.dataset.prod ? null : t.dataset.prod; renderPrices(); };
+$('gTabs').onclick = e => { const b = e.target.closest('[data-g]'); if (b) setG(b.dataset.g); };
+$('t-b').addEventListener('click', budgetClick);
+$('scrCost').addEventListener('click', costClick);
+$('scrCost').addEventListener('change', e => {
+  if (!ced) return;
+  if (e.target.id === 'ceOrig') { readCostForm(); ced.orig.push(...e.target.files); e.target.value = ''; renderCost(); }
+  else if (e.target.id === 'ceRep') { readCostForm(); renderCost(); }
+});
 $('scrEdit').addEventListener('input', e => { if (ed) edInput(e); });
 $('scrEdit').addEventListener('change', e => {
   if (!ed) return;
@@ -1045,11 +1436,12 @@ $('menu').onclick = async e => {
   $('menu').hidden = true;
   if (m.dataset.m === 'pin') showChangePin();
   else if (m.dataset.m === 'admin') showAdmin();
-  else if (m.dataset.m === 'refresh') { toast('Odświeżam…'); await sync(); toast('Dane aktualne'); }
+  else if (m.dataset.m === 'refresh') { toast('Odświeżam…'); await Promise.all([sync(), loadBudget(), loadPaliwo(true)]); toast('Dane aktualne'); }
   else if (m.dataset.m === 'logout') {
     try { await api('logout'); } catch (err) {}
     logoutLocal();
     cache = { receipts: [] }; outbox = []; lsDel(LS_CACHE); lsDel(LS_OUTBOX);
+    budget = { nodes: [], costs: [] }; paliwo = null; lsDel(LS_BUDGET); lsDel(LS_PALIWO);
     showAuth();
   }
 };

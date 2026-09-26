@@ -107,6 +107,25 @@ const MAX_RECEIPT_CHARS = 100000;
 // Model, który ostatnio zadziałał, jest zapamiętywany we właściwości GEMINI_MODEL_OK.
 const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-3.6-flash', 'gemini-flash-lite-latest'];
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/';
+const NODES_SHEET = 'Nodes';
+const NODES_HEADERS = ['id', 'parent', 'name', 'order', 'json', 'updatedBy', 'updatedAt', 'deleted'];
+const COSTS_SHEET = 'Costs';
+const COSTS_HEADERS = ['id', 'node', 'date', 'amount', 'json', 'addedBy', 'createdAt', 'updatedBy', 'updatedAt', 'deleted'];
+// Paliwo-PF oddaje swoje dane (tylko odczyt) akcją export_state — ten sam SYNC_SECRET co sync PIN-u.
+const PALIWO_EXEC = 'https://script.google.com/macros/s/AKfycbwp2qGgpobvHRCOurqA614AxnIA5ozdLlv_EsIr1Ve8t3vNp3Qur8ZfashMQpSZFuM/exec';
+const MAX_NODES = 500;
+// Startowe drzewko (tylko gdy zakładka Nodes jest pusta) — potem układa je Szef w appce.
+const DEFAULT_TREE = [
+  ['Koszty stałe', [
+    ['Mieszkanie', [['Czynsz'], ['Prąd'], ['Woda i gaz']]],
+    ['Telefony'], ['Internet + TV'],
+    ['Subskrypcje', [['YouTube'], ['Gemini'], ['Claude'], ['Spotify']]],
+    ['Ubezpieczenia']]],
+  ['Motoryzacja', [
+    ['Samochód', [['Paliwo'], ['OC / AC'], ['Przegląd'], ['Naprawy']]],
+    ['Hyosung', [['Paliwo'], ['OC / AC'], ['Przegląd'], ['Naprawy']]],
+    ['VOGE', [['Paliwo'], ['OC / AC'], ['Przegląd'], ['Naprawy']]]]]
+];
 const ARCHIVE_FOLDER_NAME = 'Wydatki domowe — paragony';
 const ARCHIVE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'image/heif': 'heif', 'image/webp': 'webp', 'application/pdf': 'pdf' };
 const MAX_ARCHIVE_B64 = 30 * 1024 * 1024; // jeden plik na żądanie
@@ -129,9 +148,9 @@ function doPost(e) {
   }
   if (!b || typeof b.action !== 'string') return jsonOut_({ ok: false, error: 'bad' });
   // Odczyt paragonu trwa kilkadziesiąt sekund — nie trzyma blokady zapisu.
-  if (b.action === 'parse') {
+  if (b.action === 'parse' || b.action === 'paliwo') {
     try {
-      return jsonOut_(parseEntry_(b));
+      return jsonOut_(b.action === 'parse' ? parseEntry_(b) : paliwoEntry_(b));
     } catch (err) {
       console.error(err && err.stack || err);
       return jsonOut_({ ok: false, error: 'server' });
@@ -181,6 +200,12 @@ function dispatch_(b) {
     case 'save': return saveReceipt_(user, b);
     case 'delete': return deleteReceipt_(user, b);
     case 'archive': return archiveFile_(user, b);
+    case 'budget': return listBudget_();
+    case 'node.save': return saveNode_(user, b);
+    case 'node.order': return orderNodes_(user, b);
+    case 'node.delete': return deleteNode_(user, b);
+    case 'cost.save': return saveCost_(user, b);
+    case 'cost.delete': return deleteCost_(user, b);
   }
   if (action.indexOf('admin.') !== 0) return fail_('bad');
   if (user.role !== 'admin') return fail_('forbidden');
@@ -537,7 +562,9 @@ function archiveMonthFolder_(rootId, ym) {
 }
 
 function archiveFile_(user, b) {
-  const found = findReceiptRow_(String(b.id || ''));
+  // kind: 'receipt' (paragon) albo 'cost' (wydatek z budżetu, np. faktura). Obie zakładki mają json w kolumnie 5.
+  const isCost = b.kind === 'cost';
+  const found = isCost ? findRow_(COSTS_SHEET, COSTS_HEADERS, String(b.id || '')) : findReceiptRow_(String(b.id || ''));
   if (!found) return fail_('notfound');
   if (found.values[9] === true || found.values[9] === 'TRUE') return fail_('deleted');
   const f = b.file || {};
@@ -547,14 +574,275 @@ function archiveFile_(user, b) {
   if (!ext || !data || data.length > MAX_ARCHIVE_B64 || /[^A-Za-z0-9+/=]/.test(data)) return fail_('bad');
   const r = JSON.parse(found.values[4]);
   const files = Array.isArray(r.files) ? r.files : [];
-  const base = r.date + ' ' + String(r.shop || 'paragon').replace(/[\\/:*?"<>|]/g, '').trim() + ' ' + String(r.total.toFixed(2)).replace('.', ',') + ' zł';
+  let label = r.shop || 'paragon', amount = Number(r.total) || 0;
+  if (isCost) {
+    const node = readNodes_().filter(function (n) { return n.id === r.node; })[0];
+    label = (node ? node.name : 'wydatek') + (r.note ? ' ' + String(r.note).slice(0, 40) : '');
+    amount = Number(r.amount) || 0;
+  }
+  const base = r.date + ' ' + String(label).replace(/[\\/:*?"<>|]/g, '').trim() + ' ' + amount.toFixed(2).replace('.', ',') + ' zł';
   const name = base + (files.length || b.more ? ' (' + (files.length + 1) + ')' : '') + '.' + ext;
   const blob = Utilities.newBlob(Utilities.base64Decode(data), type, name);
   const file = Drive.Files.create({ name: name, parents: [archiveMonthFolder_(archiveRoot_(), r.date.slice(0, 7))] }, blob, { fields: 'id' });
   files.push({ id: file.id, name: name });
   r.files = files;
-  getSheet_(RECEIPTS_SHEET, RECEIPTS_HEADERS).getRange(found.row, 5).setValue(JSON.stringify(r));
+  (isCost ? getSheet_(COSTS_SHEET, COSTS_HEADERS) : getSheet_(RECEIPTS_SHEET, RECEIPTS_HEADERS)).getRange(found.row, 5).setValue(JSON.stringify(r));
   return { ok: true, files: files };
+}
+
+// ---------- budżet: drzewko kategorii (Nodes) i wydatki (Costs) ----------
+// Węzeł bez rodzica = główna grupa (osobna zakładka w appce). Spożywka to paragony — nie ma jej w drzewku.
+// Wydatek cykliczny to JEDEN wiersz: repeat {every: 1|3|6|12 mies., until: 'RRRR-MM'|''} + overrides
+// {'RRRR-MM': inna kwota | null = pominięty} — appka sama liczy go w każdym miesiącu.
+
+function findRow_(sheetName, headers, id) {
+  const rows = getSheet_(sheetName, headers).getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) if (String(rows[i][0]) === id) return { row: i + 1, values: rows[i] };
+  return null;
+}
+
+function readNodes_() {
+  const rows = getSheet_(NODES_SHEET, NODES_HEADERS).getDataRange().getValues();
+  const out = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r[0] || r[7] === true || r[7] === 'TRUE') continue;
+    let extra = {};
+    try { extra = JSON.parse(r[4] || '{}') || {}; } catch (err) {}
+    out.push({ id: String(r[0]), parent: String(r[1] || ''), name: String(r[2]), order: Number(r[3]) || 0, link: extra.link || null, row: i + 1 });
+  }
+  return out;
+}
+
+function publicNodes_(nodes) {
+  return nodes.map(function (n) { return { id: n.id, parent: n.parent, name: n.name, order: n.order, link: n.link }; });
+}
+
+function newNodeId_() {
+  return 'n' + Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+}
+
+function seedTree_() {
+  const sheet = getSheet_(NODES_SHEET, NODES_HEADERS);
+  const now = Date.now();
+  const add = function (list, parent) {
+    list.forEach(function (x, k) {
+      const id = newNodeId_();
+      sheet.appendRow([id, parent, x[0], k, '{}', 'start', now, false]);
+      if (x[1]) add(x[1], id);
+    });
+  };
+  add(DEFAULT_TREE, '');
+}
+
+function readCosts_() {
+  const rows = getSheet_(COSTS_SHEET, COSTS_HEADERS).getDataRange().getValues();
+  const out = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r[0] || r[9] === true || r[9] === 'TRUE') continue;
+    try {
+      out.push(JSON.parse(r[4]));
+    } catch (err) {
+      console.error('Uszkodzony wiersz wydatku ' + r[0]);
+    }
+  }
+  return out;
+}
+
+function listBudget_() {
+  let nodes = readNodes_();
+  if (!nodes.length && getSheet_(NODES_SHEET, NODES_HEADERS).getLastRow() <= 1) {
+    seedTree_();
+    nodes = readNodes_();
+  }
+  return { ok: true, nodes: publicNodes_(nodes), costs: readCosts_() };
+}
+
+// Id węzła i wszystkich jego potomków.
+function subtreeIds_(nodes, id) {
+  const out = [id];
+  for (let k = 0; k < out.length; k++) {
+    nodes.forEach(function (n) { if (n.parent === out[k]) out.push(n.id); });
+  }
+  return out;
+}
+
+function cleanLink_(l) {
+  if (!l || typeof l !== 'object') return null;
+  const v = String(l.paliwo || '');
+  if (!/^[A-Za-z0-9_\-]{1,64}$/.test(v)) return null;
+  return { paliwo: v, mode: ['fuel', 'costs', 'all'].indexOf(l.mode) >= 0 ? l.mode : 'all' };
+}
+
+function saveNode_(user, b) {
+  const x = b.node || {};
+  const name = String(x.name || '').replace(/[<>]/g, '').trim();
+  if (!name || name.length > 60) return fail_('bad');
+  const nodes = readNodes_();
+  const parent = String(x.parent || '');
+  if (parent && !nodes.some(function (n) { return n.id === parent; })) return fail_('bad');
+  const sheet = getSheet_(NODES_SHEET, NODES_HEADERS);
+  const now = Date.now();
+  const old = x.id ? nodes.filter(function (n) { return n.id === x.id; })[0] : null;
+  if (x.id && !old) return fail_('notfound');
+  if (old) {
+    // Nie wolno przenieść węzła pod samego siebie ani pod własnego potomka.
+    if (parent && subtreeIds_(nodes, old.id).indexOf(parent) >= 0) return fail_('cycle');
+    const order = parent === old.parent ? old.order : nextOrder_(nodes, parent);
+    const link = x.link === undefined ? old.link : cleanLink_(x.link);
+    sheet.getRange(old.row, 1, 1, NODES_HEADERS.length).setValues([[old.id, parent, name, order, JSON.stringify({ link: link }), user.id, now, false]]);
+    audit_(user.id, 'node.save', { id: old.id, name: name });
+  } else {
+    if (nodes.length >= MAX_NODES) return fail_('limit');
+    const id = newNodeId_();
+    sheet.appendRow([id, parent, name, nextOrder_(nodes, parent), JSON.stringify({ link: cleanLink_(x.link) }), user.id, now, false]);
+    audit_(user.id, 'node.add', { id: id, name: name });
+  }
+  return { ok: true, nodes: publicNodes_(readNodes_()) };
+}
+
+function nextOrder_(nodes, parent) {
+  let max = -1;
+  nodes.forEach(function (n) { if (n.parent === parent) max = Math.max(max, n.order); });
+  return max + 1;
+}
+
+// Kolejność rodzeństwa: ids w nowej kolejności (wszystkie z tym samym rodzicem).
+function orderNodes_(user, b) {
+  const ids = Array.isArray(b.ids) ? b.ids.map(String) : [];
+  const nodes = readNodes_();
+  const list = ids.map(function (id) { return nodes.filter(function (n) { return n.id === id; })[0]; });
+  if (!list.length || list.some(function (n) { return !n || n.parent !== list[0].parent; })) return fail_('bad');
+  const sheet = getSheet_(NODES_SHEET, NODES_HEADERS);
+  list.forEach(function (n, k) { if (n.order !== k) sheet.getRange(n.row, 4).setValue(k); });
+  return { ok: true, nodes: publicNodes_(readNodes_()) };
+}
+
+// Usunięcie węzła: jego podgrupy i wydatki przechodzą do moveTo (wymagane, jeśli jest co przenosić).
+function deleteNode_(user, b) {
+  const nodes = readNodes_();
+  const node = nodes.filter(function (n) { return n.id === String(b.id || ''); })[0];
+  if (!node) return fail_('notfound');
+  const children = nodes.filter(function (n) { return n.parent === node.id; });
+  const costSheet = getSheet_(COSTS_SHEET, COSTS_HEADERS);
+  const costRows = costSheet.getDataRange().getValues();
+  const own = [];
+  for (let i = 1; i < costRows.length; i++) {
+    if (String(costRows[i][1]) === node.id && costRows[i][9] !== true && costRows[i][9] !== 'TRUE') own.push(i + 1);
+  }
+  const moveTo = String(b.moveTo || '');
+  if (children.length || own.length) {
+    const target = nodes.filter(function (n) { return n.id === moveTo; })[0];
+    if (!target || subtreeIds_(nodes, node.id).indexOf(moveTo) >= 0) return fail_('moveTo');
+    const nsheet = getSheet_(NODES_SHEET, NODES_HEADERS);
+    let order = nextOrder_(nodes, moveTo);
+    children.forEach(function (c) { nsheet.getRange(c.row, 2, 1, 2).setValues([[moveTo, order++]]); });
+    const now = Date.now();
+    own.forEach(function (row) {
+      const c = JSON.parse(costSheet.getRange(row, 5).getValue());
+      c.node = moveTo;
+      c.updatedBy = user.id;
+      c.updatedAt = now;
+      costSheet.getRange(row, 2).setValue(moveTo);
+      costSheet.getRange(row, 5).setValue(JSON.stringify(c));
+      costSheet.getRange(row, 8, 1, 2).setValues([[user.id, now]]);
+    });
+  }
+  getSheet_(NODES_SHEET, NODES_HEADERS).getRange(node.row, 6, 1, 3).setValues([[user.id, Date.now(), true]]);
+  audit_(user.id, 'node.delete', { id: node.id, name: node.name });
+  return { ok: true, nodes: publicNodes_(readNodes_()), costs: readCosts_() };
+}
+
+function cleanCost_(c, nodes) {
+  if (!c || typeof c !== 'object') return null;
+  if (!/^[A-Za-z0-9_\-]{6,64}$/.test(String(c.id || ''))) return null;
+  if (!nodes.some(function (n) { return n.id === c.node; })) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(c.date || ''))) return null;
+  const amount = Number(c.amount);
+  if (typeof c.amount !== 'number' || !isFinite(amount) || Math.abs(amount) > 1e7) return null;
+  const out = { id: String(c.id), node: String(c.node), date: String(c.date), amount: Math.round(amount * 100) / 100, note: String(c.note || '').slice(0, 200) };
+  if (c.repeat) {
+    const every = Number(c.repeat.every);
+    const until = String(c.repeat.until || '');
+    if ([1, 3, 6, 12].indexOf(every) < 0 || (until && !/^\d{4}-\d{2}$/.test(until))) return null;
+    out.repeat = { every: every, until: until };
+    const ov = {};
+    const keys = Object.keys(c.overrides || {});
+    if (keys.length > 240) return null;
+    for (let k = 0; k < keys.length; k++) {
+      const v = c.overrides[keys[k]];
+      if (!/^\d{4}-\d{2}$/.test(keys[k]) || (v !== null && (typeof v !== 'number' || !isFinite(v)))) return null;
+      ov[keys[k]] = v === null ? null : Math.round(v * 100) / 100;
+    }
+    if (keys.length) out.overrides = ov;
+  }
+  return out;
+}
+
+function saveCost_(user, b) {
+  const c = cleanCost_(b.cost, readNodes_());
+  if (!c) return fail_('bad');
+  const sheet = getSheet_(COSTS_SHEET, COSTS_HEADERS);
+  const now = Date.now();
+  const found = findRow_(COSTS_SHEET, COSTS_HEADERS, c.id);
+  if (found) {
+    const old = found.values;
+    if (old[9] === true || old[9] === 'TRUE') return fail_('deleted');
+    if (b.baseUpdatedAt != null && Number(old[8]) > Number(b.baseUpdatedAt)) return fail_('conflict', { current: JSON.parse(old[4]) });
+    const prev = JSON.parse(old[4]) || {};
+    if (prev.files && prev.files.length) c.files = prev.files;
+    c.addedBy = String(old[5]);
+    c.createdAt = Number(old[6]);
+    c.updatedBy = user.id;
+    c.updatedAt = now;
+    sheet.getRange(found.row, 1, 1, COSTS_HEADERS.length).setValues([[c.id, c.node, c.date, c.amount, JSON.stringify(c), c.addedBy, c.createdAt, user.id, now, false]]);
+  } else {
+    c.addedBy = user.id;
+    c.createdAt = now;
+    c.updatedBy = user.id;
+    c.updatedAt = now;
+    sheet.appendRow([c.id, c.node, c.date, c.amount, JSON.stringify(c), user.id, now, user.id, now, false]);
+  }
+  return { ok: true, cost: c };
+}
+
+function deleteCost_(user, b) {
+  const found = findRow_(COSTS_SHEET, COSTS_HEADERS, String(b.id || ''));
+  if (!found) return { ok: true };
+  getSheet_(COSTS_SHEET, COSTS_HEADERS).getRange(found.row, 8, 1, 3).setValues([[user.id, Date.now(), true]]);
+  audit_(user.id, 'cost.delete', { id: b.id, date: found.values[2], total: found.values[3] });
+  return { ok: true };
+}
+
+// Dane z appki Paliwo-PF (tylko odczyt). Które auto liczy się gdzie — ustala link węzła w appce.
+function paliwoEntry_(b) {
+  if (!authenticate_(b.token)) return fail_('auth');
+  const secret = PropertiesService.getScriptProperties().getProperty('SYNC_SECRET');
+  if (!secret) return fail_('paliwo', { detail: 'brak SYNC_SECRET' });
+  const res = UrlFetchApp.fetch(PALIWO_EXEC, {
+    method: 'post', contentType: 'text/plain',
+    payload: JSON.stringify({ action: 'export_state', secret: secret }),
+    muteHttpExceptions: true
+  });
+  if (res.getResponseCode() !== 200) return fail_('paliwo', { status: res.getResponseCode() });
+  let st;
+  try {
+    st = JSON.parse(res.getContentText() || '{}');
+  } catch (err) {
+    return fail_('paliwo');
+  }
+  if (!st.ok) return fail_('paliwo', { detail: String(st.error || '') });
+  const num = function (v) { return Math.round((Number(v) || 0) * 100) / 100; };
+  const date = function (v) { return /^\d{4}-\d{2}-\d{2}/.test(String(v || '')) ? String(v).slice(0, 10) : ''; };
+  return {
+    ok: true,
+    vehicles: (st.vehicles || []).map(function (v) { return { id: String(v.id), name: String(v.name || ''), type: v.type === 'prywatne' ? 'prywatne' : 'firmowe' }; }),
+    fillups: (st.fillups || []).map(function (f) { return { vehicleId: String(f.vehicleId), date: date(f.date), amount: num(f.totalCost), liters: num(f.liters) }; })
+      .filter(function (f) { return f.date; }),
+    costs: (st.costs || []).map(function (c) { return { vehicleId: String(c.vehicleId), date: date(c.date), amount: num(c.amount), category: String(c.category || ''), note: String(c.note || '').slice(0, 100) }; })
+      .filter(function (c) { return c.date; })
+  };
 }
 
 function adminImport_(admin, b) {
