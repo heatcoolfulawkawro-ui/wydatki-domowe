@@ -93,7 +93,7 @@ Do zrobienia na PC Szefa (tam są zalogowane `clasp` i `gh`), w tej kolejności:
   czy konto istnieje). Blokada 5 błędów → 5 min, podwajana do 24 h. Pierwsze uruchomienie: konto admina,
   link idzie tylko na e-mail właściciela skryptu. Dane wspólne dla domu, zapis kto dodał/zmienił.
 - Dodaj paragon: zdjęcia/zrzuty/PDF (kilka naraz) → długie zrzuty cięte na kawałki 760×1400 z zakładką →
-  `parse` w Kod.gs → Gemini (`gemini-flash-latest`, zapasowo `gemini-3.6-flash`; model, który zadziałał,
+  `parse` w Kod.gs → Gemini (`gemini-flash-latest`, zapasowo `gemini-3.6-flash`, `gemini-flash-lite-latest`; przy przeciążeniu 429/500/503 jedno ponowienie po 3 s, potem następny model; model, który zadziałał,
   zapamiętany w `GEMINI_MODEL_OK`; temperature 0, `responseMimeType: application/json`, kształt JSON
   opisany w prompcie — wzorzec z Paliwo-PF) → edytor do sprawdzenia. Szef wybrał Gemini zamiast Claude
   API (25.09.2026): ma już płatne konto Google i klucz. Do promptu idą podpowiedzi z historii (nazwa → kategoria/produkt),

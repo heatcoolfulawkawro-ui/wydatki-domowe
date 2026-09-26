@@ -38,7 +38,7 @@ const MAX_RECEIPT_CHARS = 100000;
 
 // "gemini-flash-latest" to ruchomy alias Google na aktualny model flash; reszta to zapasowe nazwy.
 // Model, który ostatnio zadziałał, jest zapamiętywany we właściwości GEMINI_MODEL_OK.
-const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-3.6-flash'];
+const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-3.6-flash', 'gemini-flash-lite-latest'];
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/';
 const MAX_PARSE_FILES = 8;
 const MAX_PARSE_B64 = 20 * 1024 * 1024;
@@ -461,6 +461,7 @@ function parseEntry_(b) {
     models.unshift(cached);
   }
   let lastError = 'nieznany błąd';
+  let retried = false;
   for (let i = 0; i < models.length; i++) {
     let res;
     try {
@@ -473,6 +474,7 @@ function parseEntry_(b) {
       });
     } catch (err) {
       lastError = models[i] + ': ' + err.message;
+      retried = false;
       continue;
     }
     const status = res.getResponseCode();
@@ -481,13 +483,23 @@ function parseEntry_(b) {
       body = JSON.parse(res.getContentText());
     } catch (err) {
       lastError = models[i] + ': HTTP ' + status;
+      retried = false;
       continue;
     }
     if (status !== 200) {
       lastError = models[i] + ': ' + (body.error ? body.error.message : 'HTTP ' + status);
       console.error('Gemini ' + lastError);
-      // Zły klucz / brak uprawnień / limit — inny model nic nie pomoże.
-      if ((status === 400 && /API key/i.test(lastError)) || status === 401 || status === 403 || status === 429) break;
+      // Zły klucz / brak uprawnień — inny model nic nie pomoże.
+      if ((status === 400 && /API key/i.test(lastError)) || status === 401 || status === 403) break;
+      // Przeciążenie Google („high demand”) / limit minutowy: raz ponów ten sam model po chwili,
+      // potem przejdź do następnego (każdy model ma osobną pulę).
+      if ((status === 429 || status === 500 || status === 503) && !retried) {
+        retried = true;
+        Utilities.sleep(3000);
+        i--;
+        continue;
+      }
+      retried = false;
       continue;
     }
     props.setProperty('GEMINI_MODEL_OK', models[i]);
