@@ -24,17 +24,7 @@ const sheets = {};
 const props = {};
 const mails = [];
 const aiCalls = [];
-const drive = []; // atrapa Dysku: {id, name, parent, type, size}
-function mkFolder(name, parent) {
-  const id = 'fld' + drive.length; drive.push({ id, name, parent, folder: true });
-  const f = {
-    getId: () => id, getUrl: () => 'https://drive.example/' + id, isTrashed: () => false,
-    createFolder: n => mkFolder(n, id),
-    getFoldersByName: n => { const list = drive.filter(x => x.folder && x.parent === id && x.name === n).map(x => x.obj); let i = 0; return { hasNext: () => i < list.length, next: () => list[i++] }; },
-    createFile: blob => { const fid = 'file' + drive.length; drive.push({ id: fid, name: blob.name, parent: id, type: blob.type, size: blob.bytes.length }); return { getId: () => fid }; }
-  };
-  drive[drive.length - 1].obj = f; return f;
-}
+const drive = []; // atrapa Dysku: {id, name, parent, folder, type, size, trashed}
 const OWNER = 'wlasciciel@example.com';
 const sb = {
   console,
@@ -47,9 +37,15 @@ const sb = {
     sendEmail: m => { if (/zly-adres/.test(m.to)) throw new Error('Invalid email'); mails.push(m); },
     getRemainingDailyQuota: () => 100
   },
-  DriveApp: {
-    createFolder: n => mkFolder(n, 'root'),
-    getFolderById: id => { const x = drive.find(d => d.id === id && d.folder); if (!x) throw new Error('not found'); return x.obj; }
+  Drive: {
+    Files: {
+      get: id => { const x = drive.find(d => d.id === id); if (!x) throw new Error('File not found: ' + id); return { id, trashed: !!x.trashed }; },
+      create: (meta, blob) => {
+        const id = (meta.mimeType ? 'fld' : 'file') + drive.length;
+        drive.push({ id, name: meta.name, parent: (meta.parents || ['root'])[0], folder: !!meta.mimeType, type: blob && blob.type, size: blob && blob.bytes.length });
+        return { id };
+      }
+    }
   },
   UrlFetchApp: {
     fetch: (url, opt) => {
@@ -92,7 +88,7 @@ http.createServer((req, res) => {
   if (req.url === '/__mail') return json(mails.map(m => ({ to: m.to, subject: m.subject, link: (m.body.match(/\?pin=([0-9a-f]+)/) || [])[1] })));
   if (req.url === '/__ai') return json(aiCalls);
   if (req.url === '/__sheets') return json(Object.fromEntries(Object.entries(sheets).map(([k, v]) => [k, v.rows])));
-  if (req.url === '/__drive') return json(drive.map(({ obj, ...x }) => x));
+  if (req.url === '/__drive') return json(drive);
   if (req.url === '/__props') return json(Object.keys(props));
   let html = fs.readFileSync(htmlFile, 'utf8');
   const n = (html.match(/const GAS_URL = '[^']*';/g) || []).length;

@@ -110,7 +110,9 @@ Do zrobienia na PC Szefa (tam są zalogowane `clasp` i `gh`), w tej kolejności:
 - Archiwum oryginałów (v0.3, 26.09.2026): po „Zapisz paragon” oryginalne pliki (zdjęcia/PDF z odczytu
   albo dołączone przyciskiem „Dołącz oryginał” w edytorze) idą akcją `archive` (jeden plik na żądanie)
   na Dysk Google właściciela: `Wydatki domowe — paragony/RRRR-MM/<data> <sklep> <kwota> zł (n).jpg`.
-  ID folderu we właściwości `ARCHIVE_FOLDER_ID`. Lista `files:[{id,name}]` w JSON paragonu — zmienia ją
+  ID folderów we właściwościach `ARCHIVE_FOLDER_ID` i `ARCHIVE_DIR_<RRRR-MM>_<rootId>`. Dysk przez usługę
+  zaawansowaną `Drive` (API v3, w manifeście) — NIE `DriveApp`: DriveApp nie działa z zakresem drive.file
+  (błąd „Specified permissions are not sufficient… /auth/drive”). Lista `files:[{id,name}]` w JSON paragonu — zmienia ją
   TYLKO `archiveFile_`; `saveReceipt_` zawsze przepisuje ją z Arkusza (klient jej nie nadpisze).
 - Uprawnienia są wpisane jawnie w `appsscript.json` (`oauthScopes`: spreadsheets.currentonly,
   script.send_mail, script.external_request, userinfo.email, drive.file). Nowa usługa Google w Kod.gs =

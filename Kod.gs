@@ -427,31 +427,37 @@ function deleteReceipt_(user, b) {
 
 // ---------- archiwum oryginałów na Dysku Google ----------
 // Oryginalne zdjęcia/PDF paragonów: „Wydatki domowe — paragony/RRRR-MM/<data> <sklep> <kwota> zł.jpg”.
-// Zakres drive.file — skrypt widzi tylko pliki i foldery, które sam utworzył.
+// Zakres drive.file — skrypt widzi tylko pliki i foldery, które sam utworzył. DriveApp tego zakresu
+// nie obsługuje (żąda pełnego dostępu do Dysku), dlatego używamy usługi zaawansowanej Drive (API v3).
+// ID folderów trzymamy we właściwościach skryptu (ARCHIVE_FOLDER_ID, ARCHIVE_DIR_RRRR-MM).
 
-function archiveRoot_() {
-  const props = PropertiesService.getScriptProperties();
-  const id = props.getProperty('ARCHIVE_FOLDER_ID');
-  if (id) {
-    try {
-      const f = DriveApp.getFolderById(id);
-      if (!f.isTrashed()) return f;
-    } catch (err) {
-      console.error('Folder archiwum niedostępny: ' + err.message);
-    }
+const FOLDER_MIME = 'application/vnd.google-apps.folder';
+
+function driveAlive_(id) {
+  try {
+    return !Drive.Files.get(id, { fields: 'trashed' }).trashed;
+  } catch (err) {
+    return false;
   }
-  const root = DriveApp.createFolder(ARCHIVE_FOLDER_NAME);
-  props.setProperty('ARCHIVE_FOLDER_ID', root.getId());
-  return root;
 }
 
-function archiveMonthFolder_(root, ym) {
-  const it = root.getFoldersByName(ym);
-  while (it.hasNext()) {
-    const f = it.next();
-    if (!f.isTrashed()) return f;
-  }
-  return root.createFolder(ym);
+function driveFolder_(propKey, name, parentId) {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty(propKey);
+  if (id && driveAlive_(id)) return id;
+  const meta = { name: name, mimeType: FOLDER_MIME };
+  if (parentId) meta.parents = [parentId];
+  const f = Drive.Files.create(meta);
+  props.setProperty(propKey, f.id);
+  return f.id;
+}
+
+function archiveRoot_() {
+  return driveFolder_('ARCHIVE_FOLDER_ID', ARCHIVE_FOLDER_NAME, null);
+}
+
+function archiveMonthFolder_(rootId, ym) {
+  return driveFolder_('ARCHIVE_DIR_' + ym + '_' + rootId, ym, rootId);
 }
 
 function archiveFile_(user, b) {
@@ -468,8 +474,8 @@ function archiveFile_(user, b) {
   const base = r.date + ' ' + String(r.shop || 'paragon').replace(/[\\/:*?"<>|]/g, '').trim() + ' ' + String(r.total.toFixed(2)).replace('.', ',') + ' zł';
   const name = base + (files.length || b.more ? ' (' + (files.length + 1) + ')' : '') + '.' + ext;
   const blob = Utilities.newBlob(Utilities.base64Decode(data), type, name);
-  const file = archiveMonthFolder_(archiveRoot_(), r.date.slice(0, 7)).createFile(blob);
-  files.push({ id: file.getId(), name: name });
+  const file = Drive.Files.create({ name: name, parents: [archiveMonthFolder_(archiveRoot_(), r.date.slice(0, 7))] }, blob, { fields: 'id' });
+  files.push({ id: file.id, name: name });
   r.files = files;
   getSheet_(RECEIPTS_SHEET, RECEIPTS_HEADERS).getRange(found.row, 5).setValue(JSON.stringify(r));
   return { ok: true, files: files };
@@ -805,7 +811,7 @@ function jsonOut_(obj) {
 // uprawnienia: Arkusz, wysyłanie maili, połączenia z Gemini API. Potem wdróż jako aplikację.
 function autoryzuj() {
   getSheet_(USERS_SHEET, USERS_HEADERS);
-  console.log('Archiwum oryginałów: ' + archiveRoot_().getUrl());
+  console.log('Archiwum oryginałów: https://drive.google.com/drive/folders/' + archiveRoot_());
   console.log('Właściciel: ' + ownerEmail_() + ', limit maili na dziś: ' + MailApp.getRemainingDailyQuota());
   UrlFetchApp.fetch(GEMINI_URL, { muteHttpExceptions: true });
 }
