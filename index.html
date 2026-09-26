@@ -143,10 +143,10 @@
 <header class="top">
   <!-- Przy KAŻDYM wydaniu: podbij vertag i ustaw buildtag na bieżący czas. -->
   <h1>Wydatki domowe<span class="vertag">v0.3</span><span class="buildtag"><span class="statusdot" id="statusDot" title="Połączenie z Arkuszem"></span>26.09.2026 09:40</span></h1>
+  <button id="btnHub" title="Rozdzielacz" hidden style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:14px;margin-right:8px;">🏠</button>
   <button class="userbtn" id="userBtn" hidden></button>
 </header>
 <div class="menu" id="menu" hidden>
-  <button data-m="hub" id="menuHub" hidden>← Rozdzielacz</button>
   <button data-m="pin">Zmień PIN</button>
   <button data-m="admin" id="menuAdmin" hidden>Panel admina</button>
   <button data-m="refresh">Odśwież dane</button>
@@ -345,7 +345,7 @@ function renderUserBtn() {
   b.hidden = !auth;
   if (auth) b.textContent = auth.user.name + ' ▾';
   $('menuAdmin').hidden = !(auth && auth.user.role === 'admin');
-  $('menuHub').hidden = !(auth && auth.user.role === 'admin');
+  $('btnHub').hidden = !(auth && auth.user.role === 'admin');
 }
 
 // ---------- logowanie ----------
@@ -1036,12 +1036,12 @@ $('scrEdit').addEventListener('change', e => {
 });
 $('scrEdit').addEventListener('click', e => { if (ed) edClick(e); });
 $('userBtn').onclick = e => { e.stopPropagation(); $('menu').hidden = !$('menu').hidden; };
+$('btnHub').onclick = () => { location.href = 'https://heatcoolfulawkawro-ui.github.io/'; };
 document.addEventListener('click', e => { if (!e.target.closest('#menu')) $('menu').hidden = true; });
 $('menu').onclick = async e => {
   const m = e.target.closest('[data-m]'); if (!m) return;
   $('menu').hidden = true;
-  if (m.dataset.m === 'hub') location.href = 'https://heatcoolfulawkawro-ui.github.io/';
-  else if (m.dataset.m === 'pin') showChangePin();
+  if (m.dataset.m === 'pin') showChangePin();
   else if (m.dataset.m === 'admin') showAdmin();
   else if (m.dataset.m === 'refresh') { toast('Odświeżam…'); await sync(); toast('Dane aktualne'); }
   else if (m.dataset.m === 'logout') {
