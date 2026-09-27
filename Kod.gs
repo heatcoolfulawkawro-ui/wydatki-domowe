@@ -164,15 +164,26 @@ function syncSelftest_() {
 function pushPinToSiblings_(pin) {
   const secret = PropertiesService.getScriptProperties().getProperty('SYNC_SECRET');
   if (!secret) return;
-  SIBLING_URLS.forEach(function (url) {
+  SIBLING_URLS.forEach(function (url) { pushOneSiblingWithRetry_(url, secret, pin); });
+}
+
+// Jedna próba + jedna powtórka po 2 s, jeśli pierwsza nie zwróciła {ok:true} —
+// siostra mogła akurat kończyć własny auto-deploy (kilkusekundowe okno).
+function pushOneSiblingWithRetry_(url, secret, newPin) {
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      UrlFetchApp.fetch(url, {
+      const res = UrlFetchApp.fetch(url, {
         method: 'post', contentType: 'text/plain',
-        payload: JSON.stringify({ action: 'sync_pin_push', secret: secret, newPin: pin }),
+        payload: JSON.stringify({ action: 'sync_pin_push', secret: secret, newPin: newPin }),
         muteHttpExceptions: true
       });
-    } catch (e) { /* best-effort — patrz komentarz wyżej */ }
-  });
+      const body = JSON.parse(res.getContentText());
+      if (body && body.ok) return;
+    } catch (e) { /* spróbuj jeszcze raz niżej */ }
+    if (attempt === 0) Utilities.sleep(2000);
+  }
+  // Obie próby zawiodły — best-effort, patrz komentarz wyżej (dogoni przy
+  // najbliższym auth-fail na tamtej appce).
 }
 
 const SESSION_TTL_MS = 60 * 24 * 3600 * 1000;

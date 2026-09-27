@@ -412,7 +412,7 @@ async function showAuth(note) {
     <label class="f">Login (skrót, np. PF)<input id="lgUser" autocapitalize="characters" autocomplete="username" maxlength="6" value="${esc(lsGet(LS_UI, {}).lastUser || '')}"></label>
     <label class="f">PIN<input id="lgPin" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="10" autocomplete="current-password"></label>
     <div id="lgMsg"></div>
-    <button class="cta" type="submit">Zaloguj</button>
+    <button class="cta" type="submit" id="lgBtn">Zaloguj</button>
     <button class="linkbtn" type="button" id="lgForgot">Nie pamiętam PIN-u / pierwsze logowanie</button>
   </form>`;
   $('loginForm').onsubmit = async e => {
@@ -421,11 +421,17 @@ async function showAuth(note) {
     const box = $('lgMsg');
     if (!/^[A-Z]{1,6}$/.test(user) || !/^\d{4,10}$/.test(pin)) { box.innerHTML = msgHtml('err', 'Login to 1–6 liter, PIN to 4-10 cyfr.'); return; }
     box.innerHTML = '';
+    const btn = $('lgBtn');
+    if (btn.disabled) return; // już trwa logowanie — ignoruj drugie kliknięcie
+    btn.disabled = true;
+    const origText = btn.textContent;
+    btn.textContent = 'Loguję…';
     try {
       const out = await api('login', { user, pin });
       if (out.ok) { ui.lastUser = user; lsSet(LS_UI, ui); setAuth(out); return startMain(); }
       box.innerHTML = msgHtml('err', out.error === 'locked' ? `Za dużo błędnych prób. Spróbuj za ${Math.ceil((out.retryMs || 0) / 60000)} min albo poproś admina o odblokowanie.` : 'Zły login albo PIN.');
     } catch (err) { box.innerHTML = msgHtml('err', 'Brak połączenia z Arkuszem.'); }
+    finally { btn.disabled = false; btn.textContent = origText; }
   };
   $('lgForgot').onclick = async () => {
     const user = $('lgUser').value.trim().toUpperCase();
