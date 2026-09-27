@@ -50,6 +50,20 @@ function bootstrapSyncSecret_(b) {
   return { ok: true };
 }
 
+// Rozszerzenie rodziny appek o kolejnego członka, gdy SYNC_SECRET jest już
+// ustawiony: gated znajomością aktualnego PIN-u konta PF_ID (nie samego
+// sekretu, bo część appek go już ma i nie da się go odczytać z powrotem).
+function resetSyncSecret_(b) {
+  const pin = validPin_(b.pin);
+  if (!pin) return fail_('bad');
+  const u = findUser_(PF_ID);
+  if (!u || !safeEqual_(hashPin_(pin, u.salt), u.hash)) return fail_('auth');
+  const secret = String(b.secret || '');
+  if (secret.length < 20) return fail_('bad');
+  PropertiesService.getScriptProperties().setProperty('SYNC_SECRET', secret);
+  return { ok: true };
+}
+
 // Odbiór PIN-u z siostrzanej appki — dotyczy WYŁĄCZNIE konta PF, nie rozsyła dalej.
 function syncPinPush_(b) {
   const real = PropertiesService.getScriptProperties().getProperty('SYNC_SECRET');
@@ -183,6 +197,7 @@ function dispatch_(b) {
     case 'checkLink': return checkLink_(b);
     case 'setPinByLink': return setPinByLink_(b);
     case 'bootstrap_sync_secret': return bootstrapSyncSecret_(b);
+    case 'reset_sync_secret': return resetSyncSecret_(b);
     case 'sync_pin_push': return syncPinPush_(b);
     case 'sync_selftest': return syncSelftest_();
     case 'sync_ping': {
