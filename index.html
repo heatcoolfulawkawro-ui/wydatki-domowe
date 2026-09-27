@@ -500,6 +500,7 @@ async function showSetPin(link) {
 }
 
 function showChangePin() {
+  if (auth.user.id === 'PF') return showChangePinLegacy();
   showScreen('scrPin');
   const el = $('scrPin');
   el.innerHTML = `<div class="pagehead"><button class="btn2" id="cpBack">‹ Wróć</button><h2>Zmień PIN</h2></div>
@@ -522,6 +523,47 @@ function showChangePin() {
       if (!out.ok) { box.innerHTML = msgHtml('err', 'Zły obecny PIN.'); return; }
       setAuth(out);
       toast('PIN zmieniony');
+      startMain();
+    } catch (err) { box.innerHTML = msgHtml('err', 'Brak połączenia z Arkuszem.'); }
+  };
+}
+
+// Konto PF: dla bezpieczeństwa zmiana idzie przez kod z maila + potwierdzenie
+// klikiem w osobny link (patrz Kod.gs: requestPinResetLegacy_/confirmPinResetLegacy_) —
+// zamiast starego PIN-u, żeby sama aktywna sesja nie wystarczała do przejęcia PIN-u.
+function showChangePinLegacy() {
+  showScreen('scrPin');
+  const el = $('scrPin');
+  el.innerHTML = `<div class="pagehead"><button class="btn2" id="cpBack">‹ Wróć</button><h2>Zmień PIN</h2></div>
+  <div class="card stack">
+    <div id="cpLegacyMsg" class="muted small">Wysyłam kod na Twój e-mail…</div>
+    <div id="cpLegacyBox" hidden>
+      <label class="f">Kod z e-maila<input id="cpCode" inputmode="numeric" pattern="[0-9]*" maxlength="6"></label>
+      <label class="f">Nowy PIN (4-10 cyfr)<input id="cpNewLegacy" class="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="10" autocomplete="new-password"></label>
+      <div id="cpMsg"></div>
+      <button class="cta" id="cpLegacySave">Zapisz PIN</button>
+    </div>
+  </div>`;
+  $('cpBack').onclick = () => startMain();
+  (async () => {
+    try {
+      const out = await api('requestPinReset', {});
+      if (out && out.ok) {
+        $('cpLegacyMsg').textContent = 'Kod wysłany na e-mail. Wpisz go razem z nowym PIN-em — potem przyjdzie jeszcze link do potwierdzenia.';
+        $('cpLegacyBox').hidden = false;
+      } else {
+        $('cpLegacyMsg').textContent = (out && out.error) || 'Nie udało się wysłać kodu — spróbuj ponownie później.';
+      }
+    } catch (e) { $('cpLegacyMsg').textContent = 'Brak połączenia z Arkuszem.'; }
+  })();
+  $('cpLegacySave').onclick = async () => {
+    const code = $('cpCode').value.trim(), n1 = $('cpNewLegacy').value.trim(), box = $('cpMsg');
+    if (!/^\d{6}$/.test(code)) { box.innerHTML = msgHtml('err', 'Podaj 6-cyfrowy kod z maila.'); return; }
+    if (!/^\d{4,10}$/.test(n1)) { box.innerHTML = msgHtml('err', 'PIN to 4-10 cyfr.'); return; }
+    try {
+      const out = await api('confirmPinReset', { code, newPin: n1 });
+      if (!out.ok) { box.innerHTML = msgHtml('err', out.error || 'Błąd.'); return; }
+      toast('Sprawdź maila i kliknij link, żeby dokończyć zmianę PIN-u', 6000);
       startMain();
     } catch (err) { box.innerHTML = msgHtml('err', 'Brak połączenia z Arkuszem.'); }
   };

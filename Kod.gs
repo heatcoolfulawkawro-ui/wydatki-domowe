@@ -76,6 +76,71 @@ function syncPinPush_(b) {
   return { ok: true };
 }
 
+// ---------- Zmiana PIN-u konta PF: kod z maila + potwierdzenie klikiem w link ----------
+// Dwa etapy, oba wymagane, zanim PIN faktycznie się zmieni: (1) request wysyła 6-cyfrowy
+// kod, (2) confirm z poprawnym kodem NIE zmienia PIN-u od razu — dopiero wysyła link,
+// którego kliknięcie (doGet, patrz confirmPinLink_) go zatwierdza. Dzięki temu sama
+// aktywna sesja PF (ani stary PIN, ani link „zapomniałem PIN-u") nie wystarczy, żeby
+// go zmienić — trzeba też mieć dostęp do skrzynki w chwili zmiany. Dotyczy WYŁĄCZNIE
+// konta PF; pozostali domownicy mają dawne ścieżki (changePin_ / setPinByLink_) bez zmian.
+function requestPinResetLegacy_() {
+  const props = PropertiesService.getScriptProperties();
+  const lastReq = Number(props.getProperty('PIN_RESET_LAST_REQ') || 0);
+  if (Date.now() - lastReq < 2 * 60 * 1000) return fail_('Poczekaj chwilę i spróbuj ponownie.');
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  props.setProperty('PIN_RESET_CODE', code);
+  props.setProperty('PIN_RESET_EXPIRES', String(Date.now() + 10 * 60 * 1000));
+  props.setProperty('PIN_RESET_LAST_REQ', String(Date.now()));
+  MailApp.sendEmail(ownerEmail_(), 'Kod do zmiany PIN — ' + APP_NAME, 'Twój kod do zmiany PIN: ' + code + '\n\nWażny 10 minut. Jeśli to nie Ty, zignoruj tę wiadomość.');
+  return { ok: true };
+}
+
+function confirmPinResetLegacy_(code, newPin) {
+  const props = PropertiesService.getScriptProperties();
+  const storedCode = props.getProperty('PIN_RESET_CODE');
+  const expires = Number(props.getProperty('PIN_RESET_EXPIRES') || 0);
+  const pin = validPin_(newPin);
+  if (!storedCode || String(code) !== storedCode) return fail_('Nieprawidłowy kod');
+  if (Date.now() > expires) return fail_('Kod wygasł — poproś o nowy');
+  if (!pin) return fail_('PIN to 4-10 cyfr');
+  props.deleteProperty('PIN_RESET_CODE');
+  props.deleteProperty('PIN_RESET_EXPIRES');
+  const token = Utilities.getUuid();
+  props.setProperty('PIN_CONFIRM_TOKEN', token);
+  props.setProperty('PIN_CONFIRM_NEWPIN', pin);
+  props.setProperty('PIN_CONFIRM_EXPIRES', String(Date.now() + 30 * 60 * 1000));
+  const url = ScriptApp.getService().getUrl() + '?confirmPin=' + encodeURIComponent(token);
+  MailApp.sendEmail(ownerEmail_(), 'Potwierdź zmianę PIN — ' + APP_NAME, 'Kliknij, żeby potwierdzić zmianę PIN-u:\n' + url + '\n\nWażne 30 minut. Jeśli to nie Ty, zignoruj — PIN się nie zmieni.');
+  return { ok: true, pending: true };
+}
+
+// Wywoływane przez GET po kliknięciu linku z maila (patrz doGet) — bez tokenu sesji,
+// bo mail otwiera się często na innym urządzeniu niż to, na którym appka jest otwarta.
+function confirmPinLink_(token) {
+  const props = PropertiesService.getScriptProperties();
+  const storedToken = props.getProperty('PIN_CONFIRM_TOKEN');
+  const expires = Number(props.getProperty('PIN_CONFIRM_EXPIRES') || 0);
+  const newPin = props.getProperty('PIN_CONFIRM_NEWPIN');
+  if (!storedToken || token !== storedToken || Date.now() > expires || !newPin) {
+    return htmlPage_('Link nieprawidłowy albo wygasł', 'Poproś o nowy kod w aplikacji i spróbuj ponownie.');
+  }
+  props.deleteProperty('PIN_CONFIRM_TOKEN');
+  props.deleteProperty('PIN_CONFIRM_EXPIRES');
+  props.deleteProperty('PIN_CONFIRM_NEWPIN');
+  const u = findUser_(PF_ID);
+  if (!u) return htmlPage_('Błąd', 'Nie znaleziono konta.');
+  setPin_(u, newPin);
+  pushPinToSiblings_(newPin);
+  return htmlPage_('PIN zmieniony ✓', 'Możesz zamknąć to okno i wrócić do aplikacji.');
+}
+
+function htmlPage_(title, msg) {
+  return HtmlService.createHtmlOutput(
+    '<html><body style="font-family:-apple-system,sans-serif;background:#12181d;color:#e8edf1;padding:40px 20px;text-align:center;">' +
+    '<h2>' + title + '</h2><p style="color:#8fa0ab">' + msg + '</p></body></html>'
+  );
+}
+
 function syncSelftest_() {
   const secret = PropertiesService.getScriptProperties().getProperty('SYNC_SECRET');
   if (!secret) return fail_('nosecret');
@@ -149,7 +214,8 @@ const MAX_PARSE_B64 = 20 * 1024 * 1024;
 
 // ---------- wejścia ----------
 
-function doGet() {
+function doGet(e) {
+  if (e && e.parameter.confirmPin) return confirmPinLink_(e.parameter.confirmPin);
   // Ping (światełko połączenia): 200 z pustą treścią. Danych przez GET nie wydajemy.
   return ContentService.createTextOutput('').setMimeType(ContentService.MimeType.JSON);
 }
@@ -212,6 +278,12 @@ function dispatch_(b) {
     case 'me': return { ok: true, user: pub_(user), hasKey: !!getApiKey_() };
     case 'logout': revokeSessions_(user.id, auth.tokenHash); return { ok: true };
     case 'changePin': return changePin_(user, b);
+    case 'requestPinReset':
+      if (user.id !== PF_ID) return fail_('forbidden');
+      return requestPinResetLegacy_();
+    case 'confirmPinReset':
+      if (user.id !== PF_ID) return fail_('forbidden');
+      return confirmPinResetLegacy_(b.code, b.newPin);
     case 'list': return listReceipts_();
     case 'save': return saveReceipt_(user, b);
     case 'delete': return deleteReceipt_(user, b);
@@ -321,23 +393,29 @@ function setPinByLink_(b) {
   if (!pin) return fail_('bad');
   const link = findLink_(b.link);
   if (!link) return fail_('link');
+  // Konto PF ma osobną, zabezpieczoną ścieżkę (kod z maila + potwierdzenie
+  // klikiem w DRUGI link — patrz requestPinResetLegacy_/confirmPinResetLegacy_);
+  // ten link (jednoetapowy, sam wystarcza do ustawienia PIN-u) jest dla niego
+  // celowo zablokowany.
+  if (link.userId === PF_ID) return fail_('forbidden');
   const u = findUser_(link.userId);
   if (!u || !u.active) return fail_('link');
   getSheet_(LINKS_SHEET, LINKS_HEADERS).getRange(link.row, 5).setValue(true);
   setPin_(u, pin);
-  if (u.id === PF_ID) pushPinToSiblings_(pin);
   audit_(u.id, 'setPinByLink', { id: u.id, purpose: link.purpose });
   return newSession_(findUser_(u.id));
 }
 
 function changePin_(user, b) {
+  // Patrz komentarz w setPinByLink_ — to samo dotyczy tej prostszej ścieżki
+  // (stary PIN -> nowy PIN, bez maila).
+  if (user.id === PF_ID) return fail_('forbidden');
   const oldPin = validPin_(b.oldPin);
   const newPin = validPin_(b.newPin);
   if (!oldPin || !newPin) return fail_('bad');
   const u = findUser_(user.id);
   if (!safeEqual_(hashPin_(oldPin, u.salt), u.hash)) return fail_('bad');
   setPin_(u, newPin);
-  if (u.id === PF_ID) pushPinToSiblings_(newPin);
   return newSession_(findUser_(u.id));
 }
 
