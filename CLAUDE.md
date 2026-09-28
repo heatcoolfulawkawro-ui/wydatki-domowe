@@ -115,6 +115,11 @@ Do zrobienia na PC Szefa (tam są zalogowane `clasp` i `gh`), w tej kolejności:
   opisany w prompcie — wzorzec z Paliwo-PF) → edytor do sprawdzenia. Szef wybrał Gemini zamiast Claude
   API (25.09.2026): ma już płatne konto Google i klucz. Do promptu idą podpowiedzi z historii (nazwa → kategoria/produkt),
   a po odczycie słownik z historii nadpisuje kategorię znanych nazw.
+- Zdjęcia czekające (v0.6, 28.09.2026): każde wybrane zdjęcie/PDF od razu do IndexedDB telefonu (`wd_pending`,
+  zapas w pamięci), ZANIM ruszy odczyt — zdjęcie z aparatu nie trafia do galerii iPhone'a. Przy błędzie odczytu:
+  „🔁 Spróbuj jeszcze raz” / „✎ Wpisz ręcznie”; lista „📥 Zdjęcia czekające” na zakładce Paragony. Wpis znika
+  dopiero po zapisie paragonu i udanym wysłaniu oryginału na Dysk (`uploadOriginals(..., pid)`).
+- Szybki wpis (v0.5): „⚡ Szybki wpis” — sklep + za co + kwota (+ kategoria) → paragon z jedną pozycją, data dziś.
 - Edytor: pozycje jako zwijane paski, suma kontrolna (pozycje vs „do zapłaty”) na dole, ostrzeżenie
   o duplikacie (ten sam sklep+data+kwota), zapis z niezgodną sumą wymaga drugiego dotknięcia.
 - Zakładki: Paragony / Miesiąc (razem, jedzenie, prognoza, 6 miesięcy, kategorie) / Sklepy (sklepy +

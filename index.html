@@ -159,7 +159,7 @@
 
 <header class="top">
   <!-- Przy KAŻDYM wydaniu: podbij vertag i ustaw buildtag na bieżący czas. -->
-  <h1>Wydatki domowe<span class="vertag">v0.5</span><span class="buildtag">26.09.2026 17:00</span></h1>
+  <h1>Wydatki domowe<span class="vertag">v0.6</span><span class="buildtag">28.09.2026 18:57</span></h1>
   <span class="statusdot" id="statusDot" title="Połączenie z Arkuszem" style="cursor:pointer;"></span>
   <button id="btnHub" title="Rozdzielacz" hidden style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:14px;margin-right:8px;">🏠</button>
   <button class="userbtn" id="userBtn" hidden></button>
@@ -209,6 +209,7 @@
       <datalist id="dlQShop"></datalist>
     </form>
     <div id="parseBox" hidden></div>
+    <div id="pendBox" class="stack"></div>
     <div id="rcList" class="stack"></div>
   </section>
   <section id="t-m" class="stack" hidden></section>
@@ -621,6 +622,7 @@ function itemLine(i) {
 }
 
 function renderReceipts() {
+  renderPending();
   const list = monthReceipts(ui.ym);
   const pend = new Set(outbox.filter(o => o.op === 'save').map(o => o.receipt.id));
   const tot = sum(list, r => r.total);
@@ -1097,30 +1099,109 @@ async function imageToTiles(file) {
   return tiles;
 }
 
-async function onFiles(files) {
+// ---------- zdjęcia czekające: pamięć telefonu (IndexedDB) ----------
+// Zdjęcie zrobione aparatem z appki nie trafia do galerii iPhone'a — zapisujemy je od razu tutaj,
+// zanim ruszy odczyt. Znika dopiero, gdy paragon jest zapisany, a oryginał jest na Dysku.
+const memPend = new Map(); // zapas, gdy przeglądarka nie da IndexedDB (np. tryb prywatny)
+function pendDb() {
+  return new Promise((ok, no) => {
+    try {
+      const rq = indexedDB.open('wd_pending', 1);
+      rq.onupgradeneeded = () => rq.result.createObjectStore('p', { keyPath: 'id' });
+      rq.onsuccess = () => ok(rq.result);
+      rq.onerror = () => no(rq.error);
+    } catch (e) { no(e); }
+  });
+}
+async function pendTx(mode, fn) {
+  const db = await pendDb();
+  return new Promise((ok, no) => {
+    const tx = db.transaction('p', mode), st = tx.objectStore('p');
+    const rq = fn(st);
+    tx.oncomplete = () => ok(rq && rq.result);
+    tx.onerror = () => no(tx.error);
+  });
+}
+async function pendPut(rec) { memPend.set(rec.id, rec); try { await pendTx('readwrite', st => st.put(rec)); } catch (e) {} }
+async function pendDel(id) { memPend.delete(id); try { await pendTx('readwrite', st => st.delete(id)); } catch (e) {} if (!$('scrMain').hidden) renderPending(); }
+async function pendAll() {
+  let list = [];
+  try { list = await pendTx('readonly', st => st.getAll()) || []; } catch (e) {}
+  const ids = new Set(list.map(x => x.id));
+  memPend.forEach(v => { if (!ids.has(v.id)) list.push(v); });
+  return list.sort((a, b) => b.at - a.at);
+}
+const pendFiles = rec => rec.files.map(f => new File([f.blob], f.name, { type: f.type }));
+async function pendSave(files) {
+  const rec = { id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), at: Date.now(),
+    files: files.map((f, k) => ({ name: f.name || 'zdjecie-' + (k + 1) + '.jpg', type: f.type || 'image/jpeg', blob: f })) };
+  await pendPut(rec);
+  return rec;
+}
+async function pendMark(id, patch) { const rec = (await pendAll()).find(x => x.id === id); if (rec) await pendPut(Object.assign(rec, patch)); }
+
+let pendSure = null;
+async function renderPending() {
+  const box = $('pendBox'); if (!box) return;
+  const list = await pendAll();
+  box.querySelectorAll('img').forEach(im => URL.revokeObjectURL(im.src));
+  if (!list.length) { box.innerHTML = ''; return; }
+  const when = t => new Date(t).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const thumb = x => x.files[0] && /^image\//.test(x.files[0].type)
+    ? `<img alt="" style="width:44px;height:44px;object-fit:cover;border-radius:6px;flex:none" src="${URL.createObjectURL(x.files[0].blob)}">`
+    : '<span style="font-size:28px">📄</span>';
+  const status = x => x.err ? `<span class="r">${esc(x.err)}</span>`
+    : `<span class="muted">${x.state === 'saved' ? 'paragon zapisany — czeka na wysłanie na Dysk' : 'nie dokończony'}</span>`;
+  box.innerHTML = `<div class="card stack"><p class="h">📥 Zdjęcia czekające (${list.length})</p>
+    <div class="muted small">Zapisane w pamięci telefonu — nie zginą, dopóki paragon nie będzie zapisany i wysłany na Dysk.</div>
+    ${list.map(x => `<div class="stack" style="border-top:1px solid var(--line);padding-top:8px">
+      <div style="display:flex;gap:8px;align-items:center">${thumb(x)}<span class="small">${when(x.at)} · ${x.files.length} ${x.files.length === 1 ? 'plik' : 'pliki'}<br>${status(x)}</span></div>
+      <div class="grid3"><button class="btn2 sm" data-pretry="${esc(x.id)}">🔁 Odczytaj</button><button class="btn2 sm" data-pman="${esc(x.id)}">✎ Ręcznie</button><button class="btn2 sm danger" data-pdel="${esc(x.id)}">${pendSure === x.id ? 'Na pewno?' : 'Usuń'}</button></div>
+    </div>`).join('')}</div>`;
+}
+async function pendClick(e) {
+  const t = e.target.closest('[data-pretry],[data-pman],[data-pdel]'); if (!t) return;
+  const id = t.dataset.pretry || t.dataset.pman || t.dataset.pdel;
+  const rec = (await pendAll()).find(x => x.id === id); if (!rec) return renderPending();
+  if (t.dataset.pdel) { if (pendSure !== id) { pendSure = id; return renderPending(); } pendSure = null; return pendDel(id); }
+  pendSure = null;
+  if (t.dataset.pretry) { window.scrollTo(0, 0); return onFiles(pendFiles(rec), rec.id); }
+  $('parseBox').hidden = true;
+  openEditor({ id: newId(), shop: '', place: '', date: new Date().toISOString().slice(0, 10), time: '', total: 0, pay: '', items: [], source: 'manual' }, true, pendFiles(rec), rec.id);
+}
+
+async function onFiles(files, pid) {
   const box = $('parseBox');
   box.hidden = false;
-  if (!hasKey) { box.innerHTML = msgHtml('err', 'Odczyt paragonów nie jest jeszcze włączony: admin musi wpisać klucz Gemini w Panelu admina. Na razie możesz wpisać paragon ręcznie.'); return; }
-  box.innerHTML = `<div class="card busy"><div class="spin"></div><div><b>Czytam paragon…</b><div class="muted small">Zwykle 20–60 sekund. Nie zamykaj appki.</div></div></div>`;
+  if (!pid) pid = (await pendSave(files)).id;
+  else await pendMark(pid, { err: '' });
+  renderPending();
+  const fail = async text => {
+    await pendMark(pid, { err: text.replace(/<[^>]+>/g, '') });
+    box.innerHTML = msgHtml('err', text) + `<div class="grid2" style="margin-top:8px"><button class="btn2" data-pretry="${esc(pid)}">🔁 Spróbuj jeszcze raz</button><button class="btn2" data-pman="${esc(pid)}">✎ Wpisz ręcznie</button></div>
+      <div class="muted small" style="margin-top:6px">Zdjęcie jest zapisane w telefonie (lista „Zdjęcia czekające” niżej) — możesz wrócić do niego później.</div>`;
+    renderPending();
+  };
+  if (!hasKey) return fail('Odczyt paragonów nie jest jeszcze włączony: admin musi wpisać klucz Gemini w Panelu admina.');
+  box.innerHTML = `<div class="card busy"><div class="spin"></div><div><b>Czytam paragon…</b><div class="muted small">Zwykle 20–60 sekund. Zdjęcie jest już zapisane w telefonie.</div></div></div>`;
   try {
     let parts = [];
     for (const f of files) {
       if (f.type === 'application/pdf') parts.push({ type: 'application/pdf', data: (await readAsDataURL(f)).split(',')[1] });
       else parts = parts.concat(await imageToTiles(f));
     }
-    if (parts.length > MAX_TILES) { box.innerHTML = msgHtml('err', `Za dużo stron/kawałków (${parts.length}, max ${MAX_TILES}). Dodaj paragon w dwóch częściach albo jako PDF.`); return; }
+    if (parts.length > MAX_TILES) return fail(`Za dużo stron/kawałków (${parts.length}, max ${MAX_TILES}). Dodaj paragon w dwóch częściach albo jako PDF.`);
     const dict = dictionary();
     const hints = [...dict.entries()].slice(-300).map(([n, v]) => `${n} → ${v.cat} / ${v.prod || ''}`);
     const out = await api('parse', { files: parts, categories: CATS, hints });
     if (!out.ok) {
       const why = { nokey: 'brak klucza Gemini (Panel admina)', ai: 'Gemini nie odczytał paragonu' + (out.detail ? ` (${esc(out.detail)})` : ''), bad: 'nieobsługiwany plik', auth: 'sesja wygasła' }[out.error] || esc(out.error);
-      box.innerHTML = msgHtml('err', 'Nie udało się: ' + why + '. Spróbuj jeszcze raz albo wpisz ręcznie.');
-      return;
+      return fail('Nie udało się: ' + why + '.');
     }
     box.hidden = true; box.innerHTML = '';
-    openEditor(fromParsed(out.receipt, dict), true, files);
+    openEditor(fromParsed(out.receipt, dict), true, files, pid);
   } catch (e) {
-    box.innerHTML = msgHtml('err', 'Brak połączenia z Arkuszem albo odczyt trwał za długo. Spróbuj jeszcze raz (najlepiej na Wi-Fi).');
+    fail('Brak połączenia z Arkuszem albo odczyt trwał za długo (najlepiej na Wi-Fi).');
   }
 }
 
@@ -1138,11 +1219,11 @@ function fromParsed(p, dict) {
 }
 
 // ---------- edytor paragonu ----------
-let ed = null; // {r, isNew, base, open:Set, confirm:null|'sum'|'dup', orig:[File] — oryginały do wysłania na Dysk po zapisie}
+let ed = null; // {r, isNew, base, open:Set, confirm:null|'sum'|'dup', orig:[File] — oryginały do wysłania na Dysk po zapisie, pid — id zdjęć czekających}
 
-function openEditor(r, isNew, orig) {
+function openEditor(r, isNew, orig, pid) {
   const copy = JSON.parse(JSON.stringify(r));
-  ed = { r: copy, isNew, base: isNew ? null : (r.updatedAt || null), open: new Set(), confirm: null, orig: orig ? [...orig] : [] };
+  ed = { r: copy, isNew, base: isNew ? null : (r.updatedAt || null), open: new Set(), confirm: null, orig: orig ? [...orig] : [], pid: pid || null };
   if (isNew && !copy.items.length) { copy.items.push(blankItem()); ed.open.add(0); }
   copy.items.forEach((it, k) => { if (it.note) ed.open.add(k); });
   showScreen('scrEdit');
@@ -1227,7 +1308,7 @@ function origHtml() {
 }
 
 // Wysyła oryginały na Dysk, gdy paragon/wydatek jest już w Arkuszu (paragon czeka na kolejkę zmian).
-async function uploadOriginals(id, files, kind) {
+async function uploadOriginals(id, files, kind, pid) {
   kind = kind || 'receipt';
   const pending = () => kind === 'receipt' && outbox.some(o => o.op === 'save' && o.receipt.id === id);
   for (let i = 0; i < 90 && pending(); i++) { if (!syncing) sync(); await sleep(1000); }
@@ -1243,6 +1324,7 @@ async function uploadOriginals(id, files, kind) {
     }
     const rc = kind === 'cost' ? budget.costs.find(x => x.id === id) : cache.receipts.find(x => x.id === id);
     if (rc && list) { rc.files = list; kind === 'cost' ? saveBudget() : saveLocal(); }
+    if (pid) await pendDel(pid);
     toast(`Oryginał na Dysku ✓ (${files.length}) — możesz usunąć z telefonu`, 5000);
     if (!$('scrMain').hidden) renderMain();
   } catch (e) {
@@ -1329,13 +1411,14 @@ function edSave() {
   if (dup && ed.confirm !== 'dup') { ed.confirm = 'dup'; updateEdSum(); return; }
   r.items.forEach(calcItem);
   delete r.warnings;
-  const base = ed.base, orig = ed.orig;
+  const base = ed.base, orig = ed.orig, pid = ed.pid;
   ui.ym = ymOf(r.date); lsSet(LS_UI, ui);
   openRc = r.id;
   ed = null;
   queue({ op: 'save', receipt: r, base });
   toast('Zapisano');
-  if (orig.length) uploadOriginals(r.id, orig);
+  if (pid) pendMark(pid, { state: 'saved', err: '' });
+  if (orig.length) uploadOriginals(r.id, orig, 'receipt', pid); else if (pid) pendDel(pid);
   ui.tab = 'p';
   startMain();
   setTab('p');
@@ -1490,6 +1573,8 @@ $('quickBox').onsubmit = e => {
   toast(`Dodano: ${shop}, ${what}, ${zl(amt)} zł`, 2500);
 };
 $('btnManual').onclick = () => openEditor({ id: newId(), shop: '', place: '', date: new Date().toISOString().slice(0, 10), time: '', total: 0, pay: '', items: [], source: 'manual' }, true);
+$('pendBox').onclick = pendClick;
+$('parseBox').onclick = pendClick;
 $('rcList').onclick = e => {
   const t = e.target.closest('[data-rc],[data-edit],[data-del],[data-delyes],[data-delno]');
   if (!t) return;
