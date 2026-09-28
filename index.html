@@ -159,7 +159,7 @@
 
 <header class="top">
   <!-- Przy KAŻDYM wydaniu: podbij vertag i ustaw buildtag na bieżący czas. -->
-  <h1>Wydatki domowe<span class="vertag">v0.6</span><span class="buildtag">28.09.2026 18:57</span></h1>
+  <h1>Wydatki domowe<span class="vertag">v0.7</span><span class="buildtag">28.09.2026 19:13</span></h1>
   <span class="statusdot" id="statusDot" title="Połączenie z Arkuszem" style="cursor:pointer;"></span>
   <button id="btnHub" title="Rozdzielacz" hidden style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:14px;margin-right:8px;">🏠</button>
   <button class="userbtn" id="userBtn" hidden></button>
@@ -1195,6 +1195,7 @@ async function onFiles(files, pid) {
     const hints = [...dict.entries()].slice(-300).map(([n, v]) => `${n} → ${v.cat} / ${v.prod || ''}`);
     const out = await api('parse', { files: parts, categories: CATS, hints });
     if (!out.ok) {
+      if (out.error === 'busy') return fail('Serwery Gemini (Google) są teraz przeciążone — to nie wina zdjęcia ani appki. Spróbuj za kilka minut; zdjęcie czeka w telefonie.');
       const why = { nokey: 'brak klucza Gemini (Panel admina)', ai: 'Gemini nie odczytał paragonu' + (out.detail ? ` (${esc(out.detail)})` : ''), bad: 'nieobsługiwany plik', auth: 'sesja wygasła' }[out.error] || esc(out.error);
       return fail('Nie udało się: ' + why + '.');
     }

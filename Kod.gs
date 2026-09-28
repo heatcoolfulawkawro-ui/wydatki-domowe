@@ -221,6 +221,7 @@ const ARCHIVE_FOLDER_NAME = 'Wydatki domowe — paragony';
 const ARCHIVE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': 'heic', 'image/heif': 'heif', 'image/webp': 'webp', 'application/pdf': 'pdf' };
 const MAX_ARCHIVE_B64 = 30 * 1024 * 1024; // jeden plik na żądanie
 const MAX_PARSE_FILES = 8;
+const PARSE_BUDGET_MS = 80 * 1000;
 const MAX_PARSE_B64 = 20 * 1024 * 1024;
 
 // ---------- wejścia ----------
@@ -240,9 +241,9 @@ function doPost(e) {
   }
   if (!b || typeof b.action !== 'string') return jsonOut_({ ok: false, error: 'bad' });
   // Odczyt paragonu trwa kilkadziesiąt sekund — nie trzyma blokady zapisu.
-  if (b.action === 'parse' || b.action === 'paliwo') {
+  if (b.action === 'parse' || b.action === 'paliwo' || b.action === 'admin.aiCheck') {
     try {
-      return jsonOut_(b.action === 'parse' ? parseEntry_(b) : paliwoEntry_(b));
+      return jsonOut_(b.action === 'parse' ? parseEntry_(b) : b.action === 'paliwo' ? paliwoEntry_(b) : aiCheck_(b));
     } catch (err) {
       console.error(err && err.stack || err);
       return jsonOut_({ ok: false, error: 'server' });
@@ -964,6 +965,55 @@ function adminImport_(admin, b) {
 
 // ---------- odczyt paragonu przez Gemini ----------
 
+// Lista modeli: właściwość GEMINI_MODELS (ustawiana z diagnostyki admina) albo stała GEMINI_MODELS.
+function geminiModels_() {
+  const v = PropertiesService.getScriptProperties().getProperty('GEMINI_MODELS');
+  const list = v ? v.split(',').map(function (x) { return x.trim(); }).filter(function (x) { return /^[a-z0-9.\-]{3,60}$/.test(x); }) : [];
+  return list.length ? list : GEMINI_MODELS.slice();
+}
+
+// Diagnostyka (tylko admin): które modele flash są dostępne dla klucza i jak szybko odpowiadają.
+// b.apply = lista modeli do zapisania jako kolejność prób (GEMINI_MODELS), [] = powrót do domyślnej.
+function aiCheck_(b) {
+  const auth = authenticate_(b.token);
+  if (!auth) return fail_('auth');
+  if (auth.user.role !== 'admin') return fail_('forbidden');
+  const props = PropertiesService.getScriptProperties();
+  if (Array.isArray(b.apply)) {
+    const list = b.apply.map(String).filter(function (x) { return /^[a-z0-9.\-]{3,60}$/.test(x); }).slice(0, 6);
+    if (list.length) props.setProperty('GEMINI_MODELS', list.join(',')); else props.deleteProperty('GEMINI_MODELS');
+    props.deleteProperty('GEMINI_MODEL_OK');
+    return { ok: true, models: geminiModels_() };
+  }
+  const key = getApiKey_();
+  if (!key) return fail_('nokey');
+  const lr = UrlFetchApp.fetch(GEMINI_URL + '?pageSize=200', { headers: { 'x-goog-api-key': key }, muteHttpExceptions: true });
+  let available = [];
+  try {
+    available = (JSON.parse(lr.getContentText()).models || [])
+      .filter(function (m) { return (m.supportedGenerationMethods || []).indexOf('generateContent') >= 0 && /flash/.test(m.name); })
+      .map(function (m) { return m.name.replace(/^models\//, ''); });
+  } catch (err) {}
+  const cands = geminiModels_().concat(available.filter(function (n) { return !/(tts|image|audio|live|embedding|preview-\d)/.test(n); }));
+  const seen = {}, results = [];
+  cands.forEach(function (m) {
+    if (seen[m] || results.length >= 10) return;
+    seen[m] = true;
+    const t = Date.now();
+    let status = 0, msg = '';
+    try {
+      const r = UrlFetchApp.fetch(GEMINI_URL + m + ':generateContent', {
+        method: 'post', contentType: 'application/json', headers: { 'x-goog-api-key': key }, muteHttpExceptions: true,
+        payload: JSON.stringify({ contents: [{ parts: [{ text: 'Odpowiedz jednym słowem: ok' }] }], generationConfig: { maxOutputTokens: 20 } })
+      });
+      status = r.getResponseCode();
+      if (status !== 200) { try { msg = JSON.parse(r.getContentText()).error.message; } catch (err) { msg = 'HTTP ' + status; } }
+    } catch (err) { msg = err.message; }
+    results.push({ model: m, status: status, ms: Date.now() - t, msg: String(msg).slice(0, 120) });
+  });
+  return { ok: true, current: geminiModels_(), cached: props.getProperty('GEMINI_MODEL_OK') || '', available: available, results: results };
+}
+
 function parseEntry_(b) {
   const auth = authenticate_(b.token);
   if (!auth) return fail_('auth');
@@ -986,7 +1036,7 @@ function parseEntry_(b) {
     generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 32768 }
   });
   const props = PropertiesService.getScriptProperties();
-  const models = GEMINI_MODELS.slice();
+  const models = geminiModels_();
   const cached = props.getProperty('GEMINI_MODEL_OK');
   if (cached) {
     const k = models.indexOf(cached);
@@ -994,8 +1044,12 @@ function parseEntry_(b) {
     models.unshift(cached);
   }
   let lastError = 'nieznany błąd';
-  let retried = false;
+  let retried = false, busy = false;
+  // Przy przeciążeniu Google każda próba potrafi trwać ~40 s — po PARSE_BUDGET_MS kończymy,
+  // zamiast trzymać telefon kilka minut (zdjęcie czeka w telefonie na ponowną próbę).
+  const t0 = Date.now();
   for (let i = 0; i < models.length; i++) {
+    if (Date.now() - t0 > PARSE_BUDGET_MS) break;
     let res;
     try {
       res = UrlFetchApp.fetch(GEMINI_URL + models[i] + ':generateContent', {
@@ -1026,7 +1080,8 @@ function parseEntry_(b) {
       if ((status === 400 && /API key/i.test(lastError)) || status === 401 || status === 403) break;
       // Przeciążenie Google („high demand”) / limit minutowy: raz ponów ten sam model po chwili,
       // potem przejdź do następnego (każdy model ma osobną pulę).
-      if ((status === 429 || status === 500 || status === 503) && !retried) {
+      if (status === 429 || status === 500 || status === 503) busy = true;
+      if ((status === 429 || status === 500 || status === 503) && !retried && Date.now() - t0 < PARSE_BUDGET_MS / 2) {
         retried = true;
         Utilities.sleep(3000);
         i--;
@@ -1050,7 +1105,7 @@ function parseEntry_(b) {
     if (!parsed || !Array.isArray(parsed.items)) return fail_('ai', { detail: 'brak listy pozycji' });
     return { ok: true, receipt: parsed, model: models[i], usage: body.usageMetadata || null };
   }
-  return fail_('ai', { detail: lastError.slice(0, 300) });
+  return fail_(busy ? 'busy' : 'ai', { detail: lastError.slice(0, 300) });
 }
 
 function parsePrompt_(categories, hints, nFiles) {
