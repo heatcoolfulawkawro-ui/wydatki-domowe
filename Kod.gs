@@ -417,13 +417,17 @@ function setPinByLink_(b) {
   if (!pin) return fail_('bad');
   const link = findLink_(b.link);
   if (!link) return fail_('link');
-  // Konto PF ma osobną, zabezpieczoną ścieżkę (kod z maila + potwierdzenie
-  // klikiem w DRUGI link — patrz requestPinResetLegacy_/confirmPinResetLegacy_);
-  // ten link (jednoetapowy, sam wystarcza do ustawienia PIN-u) jest dla niego
-  // celowo zablokowany.
-  if (link.userId === PF_ID) return fail_('forbidden');
   const u = findUser_(link.userId);
   if (!u || !u.active) return fail_('link');
+  // Konto PF ma osobną, zabezpieczoną ścieżkę NADPISANIA istniejącego PIN-u
+  // (kod z maila + potwierdzenie klikiem w DRUGI link — patrz
+  // requestPinResetLegacy_/confirmPinResetLegacy_); ten link (jednoetapowy,
+  // sam wystarcza) jest dla niego zablokowany, ale TYLKO gdy PIN już
+  // istnieje — pierwsze ustawienie świeżego konta (bootstrap albo
+  // zaproszenie od admina) nie ma jeszcze czego chronić. (Dziś bez efektu
+  // praktycznego — konto PF tu już ma PIN — ale zamyka lukę na wypadek
+  // odtworzenia konta od zera, patrz identyczna poprawka w Gotówce.)
+  if (link.userId === PF_ID && u.hash) return fail_('forbidden');
   getSheet_(LINKS_SHEET, LINKS_HEADERS).getRange(link.row, 5).setValue(true);
   setPin_(u, pin);
   audit_(u.id, 'setPinByLink', { id: u.id, purpose: link.purpose });
