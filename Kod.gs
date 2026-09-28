@@ -34,11 +34,13 @@ const AUDIT_HEADERS = ['time', 'actor', 'action', 'target', 'detail'];
 // Żeby dołożyć kolejną appkę do rodziny: dopisz jej URL tutaj i do SIBLING_URLS
 // wszystkich pozostałych, potem zbootstrapuj w niej TEN SAM sekret.
 const PF_ID = 'PF';
+// Gotówka PF CELOWO usunięta stąd 28.09.2026 — to appka z jednym wspólnym
+// PIN-em dla 2 osób (PF+ZF), nie "appka Pawła"; zsynchronizowany PIN
+// powodował, że reset PIN-u przez żonę w Gotówce nadpisywał PIN Pawła tu.
 const SIBLING_URLS = [
   'https://script.google.com/macros/s/AKfycbwp2qGgpobvHRCOurqA614AxnIA5ozdLlv_EsIr1Ve8t3vNp3Qur8ZfashMQpSZFuM/exec', // Paliwo PF
   'https://script.google.com/macros/s/AKfycbz3-nc9P2jTv3pX2_aiP6Ne7A67QXtZHObP53BU3GNMIjgrThQSJtfaOCnBbGSGSRQI/exec', // Waga PF
-  'https://script.google.com/macros/s/AKfycby09rSaJwoPPl6KeFn80xCOTiOzYM4EZyKy5XuJ0pBA28-x051wB9HXg_osSqUrjoHA/exec', // Karta godzin
-  'https://script.google.com/macros/s/AKfycbxa7mnwnG-iuFvYKqx4-callLWoLGwXzEHk4p3WnU9TdJ7_agcLWNYafWN6KQmIe__g/exec' // Gotówka PF
+  'https://script.google.com/macros/s/AKfycby09rSaJwoPPl6KeFn80xCOTiOzYM4EZyKy5XuJ0pBA28-x051wB9HXg_osSqUrjoHA/exec' // Karta godzin
 ];
 
 function bootstrapSyncSecret_(b) {
