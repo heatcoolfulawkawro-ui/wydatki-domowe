@@ -389,7 +389,7 @@ function renderUserBtn() {
   b.hidden = !auth;
   if (auth) b.textContent = auth.user.name + ' ▾';
   $('menuAdmin').hidden = !(auth && auth.user.role === 'admin');
-  $('btnHub').hidden = !(auth && auth.user.role === 'admin');
+  $('btnHub').hidden = !auth;
 }
 
 // ---------- logowanie ----------
@@ -1618,7 +1618,7 @@ $('scrEdit').addEventListener('change', e => {
 });
 $('scrEdit').addEventListener('click', e => { if (ed) edClick(e); });
 $('userBtn').onclick = e => { e.stopPropagation(); $('menu').hidden = !$('menu').hidden; };
-$('btnHub').onclick = () => { location.href = 'https://heatcoolfulawkawro-ui.github.io/'; };
+$('btnHub').onclick = () => { location.href = auth && auth.user.id === 'PF' ? 'https://heatcoolfulawkawro-ui.github.io/' : 'https://heatcoolfulawkawro-ui.github.io/zuzia/'; };
 document.addEventListener('click', e => { if (!e.target.closest('#menu')) $('menu').hidden = true; });
 $('menu').onclick = async e => {
   const m = e.target.closest('[data-m]'); if (!m) return;
