@@ -124,6 +124,11 @@ Do zrobienia na PC Szefa (tam są zalogowane `clasp` i `gh`), w tej kolejności:
   każdego) i `api('admin.aiCheck', {apply:[...]})`. Odczyt ma limit `PARSE_BUDGET_MS` = 80 s, potem błąd `busy`
   („Serwery Gemini przeciążone”). 28.09 wieczorem prawie wszystko dawało 503; działał `gemini-3.6-flash` →
   ustawione: 3.6-flash, flash-latest, 3.1-flash-lite-preview, flash-lite-latest. `gemini-2.5-*` = 404 (wycofane).
+- Zapasowy odczyt Claude (v0.8, 28.09.2026, decyzja Szefa): gdy jest klucz `ANTHROPIC_API_KEY` (Panel admina →
+  „Zapasowy odczyt (Claude)”, sprawdzany małym zapytaniem), Gemini dostaje 40 s, potem `claudeParse_` — surowe HTTP
+  `POST https://api.anthropic.com/v1/messages`, model `claude-opus-5`, `output_config.effort: 'low'`,
+  `fallbacks: 'default'` + beta `server-side-fallback-2026-07-01`, obraz = blok `image`, PDF = blok `document`,
+  ten sam prompt co Gemini. Sam Claude (bez klucza Gemini) też działa. Każda próba w zakładce AiLog.
 - Szybki wpis (v0.5): „⚡ Szybki wpis” — sklep + za co + kwota (+ kategoria) → paragon z jedną pozycją, data dziś.
 - Edytor: pozycje jako zwijane paski, suma kontrolna (pozycje vs „do zapłaty”) na dole, ostrzeżenie
   o duplikacie (ten sam sklep+data+kwota), zapis z niezgodną sumą wymaga drugiego dotknięcia.

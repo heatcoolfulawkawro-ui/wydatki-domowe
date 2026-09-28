@@ -52,6 +52,15 @@ const sb = {
   },
   UrlFetchApp: {
     fetch: (url, opt) => {
+      if (/api\.anthropic\.com/.test(url)) {
+        const key = opt.headers['x-api-key'];
+        if (/zly/.test(key)) return { getResponseCode: () => 401, getContentText: () => JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } }) };
+        const req = JSON.parse(opt.payload);
+        aiCalls.push({ url, claude: true, model: req.model, blocks: req.messages[0].content.map(c => c.type) });
+        const parsed = parseFile ? fs.readFileSync(parseFile, 'utf8') : '{"shop":"Claude-sklep","place":"","date":"2026-09-28","time":"","total":5,"pay":"","items":[{"n":"chleb","q":1,"u":"szt","p":5,"v":5,"d":0,"c":"Pieczywo","g":"Chleb","s":0,"su":"","note":""}],"warnings":[]}';
+        return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ model: req.model, stop_reason: 'end_turn', content: [{ type: 'text', text: 'Oto JSON: ' + parsed }], usage: {} }) };
+      }
+      if (props.GEMINI_FAIL && /generateContent/.test(url)) return { getResponseCode: () => 503, getContentText: () => JSON.stringify({ error: { message: 'This model is currently experiencing high demand.' } }) };
       if (!opt.payload) return { getResponseCode: () => (/zly/.test(opt.headers['x-goog-api-key']) ? 400 : 200), getContentText: () => '{}' };
       if (/"action":"(export_state|sync_ping|sync_pin_push)"/.test(opt.payload)) {
         const ok = JSON.parse(opt.payload).secret === props.SYNC_SECRET;
@@ -69,6 +78,7 @@ const sb = {
   },
   Utilities: {
     getUuid: () => crypto.randomUUID(),
+    sleep: () => {},
     newBlob: (bytes, type, name) => ({ bytes, type, name }),
     base64Decode: s => Array.from(Buffer.from(s, 'base64')),
     computeHmacSha256Signature: (msg, key) => Array.from(crypto.createHmac('sha256', key).update(msg).digest()).map(b => (b > 127 ? b - 256 : b)),
@@ -99,6 +109,7 @@ http.createServer((req, res) => {
   if (req.url === '/__ai') return json(aiCalls);
   if (req.url === '/__sheets') return json(Object.fromEntries(Object.entries(sheets).map(([k, v]) => [k, v.rows])));
   if (req.url === '/__drive') return json(drive);
+  if (req.url.startsWith('/__set?')) { const q = new URLSearchParams(req.url.slice(7)); q.forEach((v, k) => { props[k] = v; }); return json({ ok: true }); }
   if (req.url === '/__props') return json(Object.keys(props));
   let html = fs.readFileSync(htmlFile, 'utf8');
   const n = (html.match(/const GAS_URL = '[^']*';/g) || []).length;

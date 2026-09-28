@@ -159,7 +159,7 @@
 
 <header class="top">
   <!-- Przy KAŻDYM wydaniu: podbij vertag i ustaw buildtag na bieżący czas. -->
-  <h1>Wydatki domowe<span class="vertag">v0.7</span><span class="buildtag">28.09.2026 19:13</span></h1>
+  <h1>Wydatki domowe<span class="vertag">v0.8</span><span class="buildtag">28.09.2026 19:58</span></h1>
   <span class="statusdot" id="statusDot" title="Połączenie z Arkuszem" style="cursor:pointer;"></span>
   <button id="btnHub" title="Rozdzielacz" hidden style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:14px;margin-right:8px;">🏠</button>
   <button class="userbtn" id="userBtn" hidden></button>
@@ -272,7 +272,8 @@ let budget = lsGet(LS_BUDGET, { nodes: [], costs: [] }); // drzewko kategorii + 
 let paliwo = lsGet(LS_PALIWO, null);                      // dane z appki Paliwo (tylko odczyt)
 let nodeAct = null;      // panel akcji węzła: {id, mode}
 let ced = null;          // edytor wydatku
-let hasKey = true;
+let hasKey = true;          // jakikolwiek odczyt (Gemini albo Claude)
+let adm = { gemini: false, claude: false };
 let openRc = null;       // id rozwiniętego paragonu na liście
 let openProd = null;     // rozwinięty produkt w zakładce Ceny
 let pendingDelete = null;
@@ -1195,8 +1196,8 @@ async function onFiles(files, pid) {
     const hints = [...dict.entries()].slice(-300).map(([n, v]) => `${n} → ${v.cat} / ${v.prod || ''}`);
     const out = await api('parse', { files: parts, categories: CATS, hints });
     if (!out.ok) {
-      if (out.error === 'busy') return fail('Serwery Gemini (Google) są teraz przeciążone — to nie wina zdjęcia ani appki. Spróbuj za kilka minut; zdjęcie czeka w telefonie.');
-      const why = { nokey: 'brak klucza Gemini (Panel admina)', ai: 'Gemini nie odczytał paragonu' + (out.detail ? ` (${esc(out.detail)})` : ''), bad: 'nieobsługiwany plik', auth: 'sesja wygasła' }[out.error] || esc(out.error);
+      if (out.error === 'busy') return fail('Serwery odczytu (Gemini' + (/Claude/.test(out.detail || '') ? ' i Claude' : '') + ') są teraz przeciążone — to nie wina zdjęcia ani appki. Spróbuj za kilka minut; zdjęcie czeka w telefonie.');
+      const why = { nokey: 'brak klucza Gemini ani Claude (Panel admina)', ai: 'nie udało się odczytać paragonu' + (out.detail ? ` (${esc(out.detail)})` : ''), bad: 'nieobsługiwany plik', auth: 'sesja wygasła' }[out.error] || esc(out.error);
       return fail('Nie udało się: ' + why + '.');
     }
     box.hidden = true; box.innerHTML = '';
@@ -1434,7 +1435,8 @@ async function showAdmin(note) {
   let out = null;
   try { out = await api('admin.list'); } catch (e) {}
   if (!out || !out.ok) { el.querySelector('.card').outerHTML = msgHtml('err', 'Brak połączenia z Arkuszem.'); return; }
-  hasKey = out.hasKey;
+  adm = { gemini: !!out.hasKey, claude: !!out.hasClaude };
+  hasKey = adm.gemini || adm.claude;
   renderAdmin(out.users, note);
 }
 
@@ -1462,10 +1464,16 @@ function renderAdmin(users, note) {
       <button class="cta" data-ad="create">Dodaj i wyślij zaproszenie</button>
     </div>
     <div class="card stack"><p class="h">Odczyt paragonów (Gemini)</p>
-      <div>${hasKey ? '<span class="chip ok">klucz ustawiony</span>' : '<span class="chip err">brak klucza — odczyt zdjęć wyłączony</span>'}</div>
+      <div>${adm.gemini ? '<span class="chip ok">klucz ustawiony</span>' : '<span class="chip err">brak klucza</span>'}</div>
       <div class="muted small">Klucz Gemini API (zaczyna się od AIza…) — ten sam co w appce Paliwo: aistudio.google.com → Get API key, albo skopiuj z Paliwo (Apps Script → Ustawienia projektu → Właściwości skryptu → GEMINI_API_KEY). Trafia tylko do ustawień skryptu w Twoim Arkuszu — nie widać go w appce ani w repozytorium.</div>
       <input id="adKey" type="password" autocomplete="off" placeholder="AIza…">
-      <div class="grid2"><button class="btn2" data-ad="key">Zapisz klucz</button>${hasKey ? '<button class="btn2 danger" data-ad="keyDel">Usuń klucz</button>' : '<span></span>'}</div>
+      <div class="grid2"><button class="btn2" data-ad="key">Zapisz klucz</button>${adm.gemini ? '<button class="btn2 danger" data-ad="keyDel">Usuń klucz</button>' : '<span></span>'}</div>
+    </div>
+    <div class="card stack"><p class="h">Zapasowy odczyt (Claude)</p>
+      <div>${adm.claude ? '<span class="chip ok">klucz ustawiony — Claude czyta, gdy Gemini zawiedzie</span>' : '<span class="chip">brak klucza — tylko Gemini</span>'}</div>
+      <div class="muted small">Klucz Anthropic API (zaczyna się od sk-ant-…): console.anthropic.com → API Keys → Create Key. Płatne za użycie (Claude Opus 5, ok. kilku–kilkunastu groszy za paragon). Trafia tylko do ustawień skryptu — nie widać go w appce ani w repozytorium.</div>
+      <input id="adClaude" type="password" autocomplete="off" placeholder="sk-ant-…">
+      <div class="grid2"><button class="btn2" data-ad="claude">Zapisz klucz</button>${adm.claude ? '<button class="btn2 danger" data-ad="claudeDel">Usuń klucz</button>' : '<span></span>'}</div>
     </div>
     <div class="card stack"><p class="h">Import paragonów z pliku</p>
       <div class="muted small">Plik .json z paragonami (np. przygotowany na czacie z Claude). Paragony, które już są, zostaną pominięte.</div>
@@ -1485,7 +1493,7 @@ async function adminClick(e, users) {
       const warn = out.sent === false ? msgHtml('err', 'Konto zapisane, ale mail się nie wysłał (limit Google albo zły adres). Spróbuj „Wyślij” później.') : msgHtml('ok', okText);
       if (out.users) renderAdmin(out.users, warn); else showAdmin(warn);
     } else {
-      const why = { exists: 'taki login już jest', bad: 'sprawdź dane', badkey: 'to nie wygląda na klucz (bez spacji, 20–200 znaków)', keyrejected: 'Gemini odrzucił ten klucz (kod ' + (out && out.status) + ') — sprawdź, czy skopiował się cały i tylko klucz', keycheck: 'nie udało się połączyć z Gemini, spróbuj za chwilę' }[out && out.error] || 'brak połączenia';
+      const why = { exists: 'taki login już jest', bad: 'sprawdź dane', badkey: 'to nie wygląda na klucz (bez spacji, 20–200 znaków)', keyrejected: 'klucz odrzucony (kod ' + (out && out.status) + (out && out.detail ? ': ' + esc(out.detail) : '') + ') — sprawdź, czy skopiował się cały i tylko klucz', keycheck: 'nie udało się sprawdzić klucza, spróbuj za chwilę' }[out && out.error] || 'brak połączenia';
       $('scrAdmin').insertAdjacentHTML('afterbegin', msgHtml('err', 'Nie udało się: ' + why + '.'));
       window.scrollTo(0, 0);
     }
@@ -1505,7 +1513,15 @@ async function adminClick(e, users) {
       const key = a === 'key' ? $('adKey').value.trim() : '';
       if (a === 'key' && !key) return;
       const out = await api('admin.setApiKey', { key });
-      if (out && out.ok) { hasKey = out.hasKey; showAdmin(msgHtml('ok', out.hasKey ? 'Klucz zapisany — odczyt paragonów włączony.' : 'Klucz usunięty.')); }
+      if (out && out.ok) showAdmin(msgHtml('ok', out.hasKey ? 'Klucz zapisany — odczyt paragonów włączony.' : 'Klucz usunięty.'));
+      else done(out);
+    }
+    else if (a === 'claude' || a === 'claudeDel') {
+      const key = a === 'claude' ? $('adClaude').value.trim() : '';
+      if (a === 'claude' && !key) return;
+      t.disabled = true; t.textContent = 'Sprawdzam klucz…';
+      const out = await api('admin.setClaudeKey', { key });
+      if (out && out.ok) showAdmin(msgHtml('ok', out.hasClaude ? 'Klucz Claude zapisany — zapasowy odczyt włączony.' : 'Klucz Claude usunięty.'));
       else done(out);
     }
   } catch (err) { done(null); }

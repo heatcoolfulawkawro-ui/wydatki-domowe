@@ -222,6 +222,12 @@ const ARCHIVE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': '
 const MAX_ARCHIVE_B64 = 30 * 1024 * 1024; // jeden plik na żądanie
 const MAX_PARSE_FILES = 8;
 const PARSE_BUDGET_MS = 80 * 1000;
+// Zapasowy odczyt przez Claude (Anthropic Messages API, surowe HTTP — Apps Script nie ma SDK).
+// Klucz we właściwości ANTHROPIC_API_KEY (wpisuje admin w appce). Gdy jest, Gemini dostaje krótszy limit.
+const CLAUDE_URL = 'https://api.anthropic.com/v1/messages';
+const CLAUDE_MODEL = 'claude-opus-5';
+const CLAUDE_HEADERS_BASE = { 'anthropic-version': '2023-06-01', 'anthropic-beta': 'server-side-fallback-2026-07-01' };
+const GEMINI_BUDGET_WITH_CLAUDE_MS = 40 * 1000;
 // Dziennik prób Gemini (diagnostyka): czas, model, status HTTP, ms, rozmiar, komunikat. Trzymamy ~300 ostatnich.
 const AILOG_SHEET = 'AiLog';
 const AILOG_HEADERS = ['time', 'model', 'status', 'ms', 'kb', 'msg'];
@@ -290,7 +296,7 @@ function dispatch_(b) {
   if (!auth) return fail_('auth');
   const user = auth.user;
   switch (action) {
-    case 'me': return { ok: true, user: pub_(user), hasKey: !!getApiKey_() };
+    case 'me': return { ok: true, user: pub_(user), hasKey: !!(getApiKey_() || getClaudeKey_()) };
     case 'logout': revokeSessions_(user.id, auth.tokenHash); return { ok: true };
     case 'changePin': return changePin_(user, b);
     case 'requestPinReset':
@@ -319,13 +325,14 @@ function dispatch_(b) {
 
 function adminAction_(admin, action, b) {
   switch (action) {
-    case 'admin.list': return { ok: true, users: readUsers_().map(adminView_), hasKey: !!getApiKey_() };
+    case 'admin.list': return { ok: true, users: readUsers_().map(adminView_), hasKey: !!getApiKey_(), hasClaude: !!getClaudeKey_() };
     case 'admin.createUser': return adminCreateUser_(b);
     case 'admin.sendLink': return adminSendLink_(b);
     case 'admin.setEmail': return adminSetEmail_(b);
     case 'admin.setActive': return adminSetActive_(admin, b);
     case 'admin.unlock': return adminUnlock_(b);
     case 'admin.setApiKey': return adminSetApiKey_(b);
+    case 'admin.setClaudeKey': return adminSetClaudeKey_(b);
     case 'admin.import': return adminImport_(admin, b);
   }
   return fail_('bad');
@@ -499,6 +506,90 @@ function adminSetApiKey_(b) {
   props.setProperty('GEMINI_API_KEY', key);
   props.deleteProperty('GEMINI_MODEL_OK');
   return { ok: true, hasKey: true };
+}
+
+function getClaudeKey_() {
+  return PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY') || '';
+}
+
+function claudeRequest_(key, content, maxTokens) {
+  return UrlFetchApp.fetch(CLAUDE_URL, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: Object.assign({ 'x-api-key': key }, CLAUDE_HEADERS_BASE),
+    payload: JSON.stringify({
+      model: CLAUDE_MODEL,
+      max_tokens: maxTokens,
+      output_config: { effort: 'low' }, // przepisanie paragonu to prosta ekstrakcja — szybciej i taniej
+      fallbacks: 'default',
+      messages: [{ role: 'user', content: content }]
+    }),
+    muteHttpExceptions: true
+  });
+}
+
+// Klucz sprawdzamy prawdziwym, malutkim zapytaniem (ten sam kształt co przy odczycie paragonu).
+function adminSetClaudeKey_(b) {
+  const key = String(b.key || '').trim();
+  const props = PropertiesService.getScriptProperties();
+  if (!key) {
+    props.deleteProperty('ANTHROPIC_API_KEY');
+    return { ok: true, hasClaude: false };
+  }
+  if (!/^[\x21-\x7e]{20,300}$/.test(key)) return fail_('badkey');
+  let res;
+  try {
+    res = claudeRequest_(key, [{ type: 'text', text: 'Odpowiedz jednym słowem: ok' }], 64);
+  } catch (err) {
+    return fail_('keycheck');
+  }
+  const code = res.getResponseCode();
+  if (code === 401 || code === 403) return fail_('keyrejected', { status: code });
+  if (code !== 200 && code !== 429 && code !== 529) {
+    let msg = '';
+    try { msg = JSON.parse(res.getContentText()).error.message; } catch (err) {}
+    return fail_('keyrejected', { status: code, detail: String(msg).slice(0, 200) });
+  }
+  props.setProperty('ANTHROPIC_API_KEY', key);
+  return { ok: true, hasClaude: true };
+}
+
+// Odczyt paragonu przez Claude — ten sam prompt i ten sam kształt JSON co Gemini.
+function claudeParse_(key, prompt, files, log, prevError) {
+  const content = files.map(function (f) {
+    return f.type === 'application/pdf'
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.data } }
+      : { type: 'image', source: { type: 'base64', media_type: f.type, data: f.data } };
+  });
+  content.push({ type: 'text', text: prompt });
+  const t = Date.now();
+  let res;
+  try {
+    res = claudeRequest_(key, content, 16000);
+  } catch (err) {
+    log(CLAUDE_MODEL, 0, Date.now() - t, err.message);
+    return fail_('ai', { detail: (prevError ? 'Gemini: ' + prevError + ' · ' : '') + 'Claude: ' + err.message });
+  }
+  const status = res.getResponseCode();
+  let body = {};
+  try { body = JSON.parse(res.getContentText()); } catch (err) {}
+  log(CLAUDE_MODEL, status, Date.now() - t, status === 200 ? 'ok ' + (body.stop_reason || '') : res.getContentText().slice(0, 300).replace(/\s+/g, ' '));
+  if (status !== 200) {
+    const busy = status === 429 || status === 529 || status >= 500;
+    return fail_(busy ? 'busy' : 'ai', { detail: 'Claude: ' + (body.error ? body.error.message : 'HTTP ' + status) });
+  }
+  if (body.stop_reason === 'refusal') return fail_('ai', { detail: 'Claude odmówił odczytu' });
+  if (body.stop_reason === 'max_tokens') return fail_('ai', { detail: 'paragon za długi — podziel go na dwie części' });
+  const text = (body.content || []).filter(function (c) { return c.type === 'text'; }).map(function (c) { return c.text; }).join('');
+  const a = text.indexOf('{'), z = text.lastIndexOf('}');
+  let parsed;
+  try {
+    parsed = JSON.parse(text.slice(a, z + 1));
+  } catch (err) {
+    return fail_('ai', { detail: 'Claude: odpowiedź nie jest JSON-em' });
+  }
+  if (!parsed || !Array.isArray(parsed.items)) return fail_('ai', { detail: 'Claude: brak listy pozycji' });
+  return { ok: true, receipt: parsed, model: body.model || CLAUDE_MODEL, usage: body.usage || null };
 }
 
 // ---------- linki mailowe ----------
@@ -1021,11 +1112,14 @@ function parseEntry_(b) {
   const auth = authenticate_(b.token);
   if (!auth) return fail_('auth');
   const key = getApiKey_();
-  if (!key) return fail_('nokey');
+  const claudeKey = getClaudeKey_();
+  if (!key && !claudeKey) return fail_('nokey');
+  const budget = claudeKey ? GEMINI_BUDGET_WITH_CLAUDE_MS : PARSE_BUDGET_MS;
   const files = Array.isArray(b.files) ? b.files : [];
   if (!files.length || files.length > MAX_PARSE_FILES) return fail_('bad');
   let size = 0;
-  const parts = [{ text: parsePrompt_(b.categories, b.hints, files.length) }];
+  const prompt = parsePrompt_(b.categories, b.hints, files.length);
+  const parts = [{ text: prompt }];
   for (let i = 0; i < files.length; i++) {
     const f = files[i] || {};
     const data = String(f.data || '');
@@ -1039,8 +1133,8 @@ function parseEntry_(b) {
     generationConfig: { temperature: 0, responseMimeType: 'application/json', maxOutputTokens: 32768 }
   });
   const props = PropertiesService.getScriptProperties();
-  const models = geminiModels_();
-  const cached = props.getProperty('GEMINI_MODEL_OK');
+  const models = key ? geminiModels_() : [];
+  const cached = key ? props.getProperty('GEMINI_MODEL_OK') : null;
   if (cached) {
     const k = models.indexOf(cached);
     if (k >= 0) models.splice(k, 1);
@@ -1060,7 +1154,7 @@ function parseEntry_(b) {
     } catch (err) {}
   };
   for (let i = 0; i < models.length; i++) {
-    if (Date.now() - t0 > PARSE_BUDGET_MS) break;
+    if (Date.now() - t0 > budget) break;
     let res;
     const ta = Date.now();
     try {
@@ -1095,7 +1189,7 @@ function parseEntry_(b) {
       // Przeciążenie Google („high demand”) / limit minutowy: raz ponów ten sam model po chwili,
       // potem przejdź do następnego (każdy model ma osobną pulę).
       if (status === 429 || status === 500 || status === 503) busy = true;
-      if ((status === 429 || status === 500 || status === 503) && !retried && Date.now() - t0 < PARSE_BUDGET_MS / 2) {
+      if ((status === 429 || status === 500 || status === 503) && !retried && Date.now() - t0 < budget / 2) {
         retried = true;
         Utilities.sleep(3000);
         i--;
@@ -1119,6 +1213,7 @@ function parseEntry_(b) {
     if (!parsed || !Array.isArray(parsed.items)) return fail_('ai', { detail: 'brak listy pozycji' });
     return { ok: true, receipt: parsed, model: models[i], usage: body.usageMetadata || null };
   }
+  if (claudeKey) return claudeParse_(claudeKey, prompt, files, log, key ? lastError.slice(0, 150) : '');
   return fail_(busy ? 'busy' : 'ai', { detail: lastError.slice(0, 300) });
 }
 
@@ -1334,7 +1429,7 @@ function audit_(actor, action, b) {
   ['id', 'name', 'email', 'active', 'role', 'purpose', 'shop', 'date', 'total'].forEach(function (k) {
     if (b && b[k] !== undefined) detail[k] = b[k];
   });
-  if (action === 'admin.setApiKey') detail.key = b && b.key ? 'ustawiony' : 'usunięty';
+  if (action === 'admin.setApiKey' || action === 'admin.setClaudeKey') detail.key = b && b.key ? 'ustawiony' : 'usunięty';
   if (action === 'admin.import' && b && Array.isArray(b.receipts)) detail.count = b.receipts.length;
   getSheet_(AUDIT_SHEET, AUDIT_HEADERS).appendRow([
     Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm:ss'), actor, action, String(detail.id || ''), JSON.stringify(detail)
