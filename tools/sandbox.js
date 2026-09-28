@@ -19,7 +19,8 @@ function mkSheet(headers) {
       setValue: v => { rows[row - 1][col - 1] = v; },
       setValues: vs => { for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) rows[row - 1 + i][col - 1 + j] = vs[i][j]; }
     }),
-    deleteRow: n => { rows.splice(n - 1, 1); }
+    deleteRow: n => { rows.splice(n - 1, 1); },
+    deleteRows: (n, k) => { rows.splice(n - 1, k); }
   };
 }
 const sheets = {};

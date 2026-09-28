@@ -222,6 +222,9 @@ const ARCHIVE_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/heic': '
 const MAX_ARCHIVE_B64 = 30 * 1024 * 1024; // jeden plik na żądanie
 const MAX_PARSE_FILES = 8;
 const PARSE_BUDGET_MS = 80 * 1000;
+// Dziennik prób Gemini (diagnostyka): czas, model, status HTTP, ms, rozmiar, komunikat. Trzymamy ~300 ostatnich.
+const AILOG_SHEET = 'AiLog';
+const AILOG_HEADERS = ['time', 'model', 'status', 'ms', 'kb', 'msg'];
 const MAX_PARSE_B64 = 20 * 1024 * 1024;
 
 // ---------- wejścia ----------
@@ -1048,9 +1051,18 @@ function parseEntry_(b) {
   // Przy przeciążeniu Google każda próba potrafi trwać ~40 s — po PARSE_BUDGET_MS kończymy,
   // zamiast trzymać telefon kilka minut (zdjęcie czeka w telefonie na ponowną próbę).
   const t0 = Date.now();
+  const kb = Math.round(payload.length / 1024);
+  const log = function (model, status, ms, msg) {
+    try {
+      const sh = getSheet_(AILOG_SHEET, AILOG_HEADERS);
+      sh.appendRow([Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm:ss'), model, status, ms, kb, String(msg || '').slice(0, 150)]);
+      if (sh.getLastRow() > 400) sh.deleteRows(2, 100);
+    } catch (err) {}
+  };
   for (let i = 0; i < models.length; i++) {
     if (Date.now() - t0 > PARSE_BUDGET_MS) break;
     let res;
+    const ta = Date.now();
     try {
       res = UrlFetchApp.fetch(GEMINI_URL + models[i] + ':generateContent', {
         method: 'post',
@@ -1061,10 +1073,12 @@ function parseEntry_(b) {
       });
     } catch (err) {
       lastError = models[i] + ': ' + err.message;
+      log(models[i], 0, Date.now() - ta, err.message);
       retried = false;
       continue;
     }
     const status = res.getResponseCode();
+    log(models[i], status, Date.now() - ta, status === 200 ? 'ok' : res.getContentText().slice(0, 300).replace(/\s+/g, ' '));
     let body;
     try {
       body = JSON.parse(res.getContentText());
