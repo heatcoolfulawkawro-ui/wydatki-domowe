@@ -227,8 +227,8 @@ const PARSE_BUDGET_MS = 80 * 1000;
 // Zapasowy odczyt przez Claude (Anthropic Messages API, surowe HTTP — Apps Script nie ma SDK).
 // Klucz we właściwości ANTHROPIC_API_KEY (wpisuje admin w appce). Gdy jest, Gemini dostaje krótszy limit.
 const CLAUDE_URL = 'https://api.anthropic.com/v1/messages';
-const CLAUDE_MODEL = 'claude-opus-5';
-const CLAUDE_HEADERS_BASE = { 'anthropic-version': '2023-06-01', 'anthropic-beta': 'server-side-fallback-2026-07-01' };
+const CLAUDE_MODEL = 'claude-sonnet-5'; // decyzja Szefa 28.09.2026: tańszy model wystarcza do paragonów
+const CLAUDE_HEADERS_BASE = { 'anthropic-version': '2023-06-01' };
 const GEMINI_BUDGET_WITH_CLAUDE_MS = 40 * 1000;
 // Dziennik prób Gemini (diagnostyka): czas, model, status HTTP, ms, rozmiar, komunikat. Trzymamy ~300 ostatnich.
 const AILOG_SHEET = 'AiLog';
@@ -523,7 +523,6 @@ function claudeRequest_(key, content, maxTokens) {
       model: CLAUDE_MODEL,
       max_tokens: maxTokens,
       output_config: { effort: 'low' }, // przepisanie paragonu to prosta ekstrakcja — szybciej i taniej
-      fallbacks: 'default',
       messages: [{ role: 'user', content: content }]
     }),
     muteHttpExceptions: true

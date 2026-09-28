@@ -159,7 +159,7 @@
 
 <header class="top">
   <!-- Przy KAŻDYM wydaniu: podbij vertag i ustaw buildtag na bieżący czas. -->
-  <h1>Wydatki domowe<span class="vertag">v0.8</span><span class="buildtag">28.09.2026 19:58</span></h1>
+  <h1>Wydatki domowe<span class="vertag">v0.8.1</span><span class="buildtag">28.09.2026 20:01</span></h1>
   <span class="statusdot" id="statusDot" title="Połączenie z Arkuszem" style="cursor:pointer;"></span>
   <button id="btnHub" title="Rozdzielacz" hidden style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:14px;margin-right:8px;">🏠</button>
   <button class="userbtn" id="userBtn" hidden></button>
@@ -1471,7 +1471,7 @@ function renderAdmin(users, note) {
     </div>
     <div class="card stack"><p class="h">Zapasowy odczyt (Claude)</p>
       <div>${adm.claude ? '<span class="chip ok">klucz ustawiony — Claude czyta, gdy Gemini zawiedzie</span>' : '<span class="chip">brak klucza — tylko Gemini</span>'}</div>
-      <div class="muted small">Klucz Anthropic API (zaczyna się od sk-ant-…): console.anthropic.com → API Keys → Create Key. Płatne za użycie (Claude Opus 5, ok. 20–50 gr za paragon — liczone tylko wtedy, gdy Gemini zawiedzie). Trafia tylko do ustawień skryptu — nie widać go w appce ani w repozytorium.</div>
+      <div class="muted small">Klucz Anthropic API (zaczyna się od sk-ant-…): console.anthropic.com → API Keys → Create Key. Płatne za użycie (Claude Sonnet 5, ok. 10–20 gr za paragon — liczone tylko wtedy, gdy Gemini zawiedzie). Trafia tylko do ustawień skryptu — nie widać go w appce ani w repozytorium.</div>
       <input id="adClaude" type="password" autocomplete="off" placeholder="sk-ant-…">
       <div class="grid2"><button class="btn2" data-ad="claude">Zapisz klucz</button>${adm.claude ? '<button class="btn2 danger" data-ad="claudeDel">Usuń klucz</button>' : '<span></span>'}</div>
     </div>
