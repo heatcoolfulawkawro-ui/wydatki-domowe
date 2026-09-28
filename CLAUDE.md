@@ -119,6 +119,11 @@ Do zrobienia na PC Szefa (tam są zalogowane `clasp` i `gh`), w tej kolejności:
   zapas w pamięci), ZANIM ruszy odczyt — zdjęcie z aparatu nie trafia do galerii iPhone'a. Przy błędzie odczytu:
   „🔁 Spróbuj jeszcze raz” / „✎ Wpisz ręcznie”; lista „📥 Zdjęcia czekające” na zakładce Paragony. Wpis znika
   dopiero po zapisie paragonu i udanym wysłaniu oryginału na Dysk (`uploadOriginals(..., pid)`).
+- Modele Gemini (v0.7, 28.09.2026): kolejność prób we właściwości skryptu `GEMINI_MODELS` (nadpisuje stałą),
+  ustawiana diagnostyką admina: w konsoli appki `api('admin.aiCheck')` (lista dostępnych modeli flash + test
+  każdego) i `api('admin.aiCheck', {apply:[...]})`. Odczyt ma limit `PARSE_BUDGET_MS` = 80 s, potem błąd `busy`
+  („Serwery Gemini przeciążone”). 28.09 wieczorem prawie wszystko dawało 503; działał `gemini-3.6-flash` →
+  ustawione: 3.6-flash, flash-latest, 3.1-flash-lite-preview, flash-lite-latest. `gemini-2.5-*` = 404 (wycofane).
 - Szybki wpis (v0.5): „⚡ Szybki wpis” — sklep + za co + kwota (+ kategoria) → paragon z jedną pozycją, data dziś.
 - Edytor: pozycje jako zwijane paski, suma kontrolna (pozycje vs „do zapłaty”) na dole, ostrzeżenie
   o duplikacie (ten sam sklep+data+kwota), zapis z niezgodną sumą wymaga drugiego dotknięcia.
