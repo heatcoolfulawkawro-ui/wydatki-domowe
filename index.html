@@ -8,17 +8,28 @@
 <meta name="theme-color" content="#12181d">
 <title>Wydatki domowe</title>
 <script>
-// Skróty na ekranie głównym telefonu potrafią pokazywać starą wersję z cache.
-// Sprawdzamy w tle prawdziwą wersję na serwerze i przeładowujemy, jeśli jest nowsza.
+// Skróty na ekranie głównym telefonu potrafią pokazywać zbuforowaną, starą
+// wersję strony. Porównujemy wersję TEJ strony (document.lastModified) z wersją
+// na serwerze (HEAD bez cache) i przy nowszej przeładowujemy raz. Klucz
+// 'wd_page_version' trzyma stałą wartość, bo stare kopie strony (sprzed 30.09.2026)
+// porównują go z serwerem — dzięki temu same przeskakują na świeżą wersję.
 (function(){
+  var pageMs = Date.parse(document.lastModified);
+  try{ localStorage.setItem('wd_page_version', 'nowy-mechanizm'); }catch(e){}
   try{
     fetch(location.pathname, { method:'HEAD', cache:'no-store' }).then(function(res){
-      var v = res.headers.get('last-modified') || res.headers.get('etag');
-      if(!v) return;
-      var stored = localStorage.getItem('wd_page_version');
-      localStorage.setItem('wd_page_version', v);
-      if(stored && stored !== v) location.reload();
+      var serverMs = Date.parse(res.headers.get('last-modified') || '');
+      if(isNaN(serverMs) || isNaN(pageMs) || serverMs - pageMs < 5000) return;
+      var guard = 'wd_page_version_reload_' + serverMs;
+      if(sessionStorage.getItem(guard)) return;
+      sessionStorage.setItem(guard, '1');
+      // Unikalny ?v= wymusza pobranie z sieci (GitHub Pages trzyma cache 10 min);
+      // pozostałe parametry, np. ?pin= z linku w mailu, zostają.
+      var q = new URLSearchParams(location.search); q.set('v', Date.now());
+      location.replace(location.pathname + '?' + q.toString());
     }).catch(function(){});
+    // Odśwież zbuforowaną kopię spod gołego adresu — to ją otwierają skróty i rozdzielacze.
+    fetch(location.pathname, { cache:'reload' }).catch(function(){});
   }catch(e){}
 })();
 </script>
@@ -159,7 +170,7 @@
 
 <header class="top">
   <!-- Przy KAŻDYM wydaniu: podbij vertag i ustaw buildtag na bieżący czas. -->
-  <h1>Wydatki domowe<span class="vertag">v0.8.1</span><span class="buildtag">28.09.2026 20:01</span></h1>
+  <h1>Wydatki domowe<span class="vertag">v0.8.2</span><span class="buildtag">30.09.2026 16:23</span></h1>
   <span class="statusdot" id="statusDot" title="Połączenie z Arkuszem" style="cursor:pointer;"></span>
   <button id="btnHub" title="Rozdzielacz" hidden style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:14px;margin-right:8px;">🏠</button>
   <button class="userbtn" id="userBtn" hidden></button>

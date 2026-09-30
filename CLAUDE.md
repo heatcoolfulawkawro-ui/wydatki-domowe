@@ -52,7 +52,7 @@ Do zrobienia na PC Szefa (tam są zalogowane `clasp` i `gh`), w tej kolejności:
 
 ## Wdrażanie — wszystko przez `git push` na `main`
 
-- Frontend: push → Pages (~1 min); appka sama wykrywa nową wersję (HEAD + `last-modified`).
+- Frontend: push → Pages (~1 min); appka sama wykrywa nową wersję (porównuje `document.lastModified` TEJ strony z `last-modified` z `HEAD` i przy nowszej przeładowuje raz przez `?v=` (strażnik w sessionStorage, inne parametry URL zostają); od 30.09.2026 ten sam skrypt we wszystkich mini appkach).
   Przy każdym wydaniu podbij `.vertag` i ustaw `.buildtag` (`DD.MM.RRRR GG:MM`, czas polski).
 - Backend: push zmieniający `Kod.gs`/`appsscript.json` → `.github/workflows/deploy-gas.yml`
   (`clasp push -f` + `clasp deploy --deploymentId <istniejące>`). Nigdy bez `--deploymentId`.
